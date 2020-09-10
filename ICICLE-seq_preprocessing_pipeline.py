@@ -14,7 +14,9 @@ import argparse
 
 """
 
-Script written by Elliott Swanson (elliott.swanson@alleninstitute.org). Free for academic use only.
+Script written by Elliott Swanson of the Allen Institute for Immunology (elliott.swanson@alleninstitute.org). Free for academic use only.
+
+See file LICENSE for code reuse permissions.
 
 """
 
