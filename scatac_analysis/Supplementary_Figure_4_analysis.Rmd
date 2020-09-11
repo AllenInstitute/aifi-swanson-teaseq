@@ -1,0 +1,497 @@
+---
+title: "Fragment size analysis"
+author: "Lucas Graybuck"
+date: "5/27/2020"
+output: html_document
+---
+
+## Setup
+
+Load Packages
+```{r}
+quiet_library <- function(...) {
+  suppressPackageStartupMessages(library(...))
+}
+
+quiet_library(data.table)
+quiet_library(dplyr)
+quiet_library(purrr)
+quiet_library(ggplot2)
+quiet_library(ggrastr)
+quiet_library(cowplot)
+quiet_library(patchwork)
+quiet_library(GenomicRanges)
+options(stringsAsFactors = FALSE)
+source("../common/granges_helpers.R")
+```
+
+Source directories
+```{r}
+full_meta_dir <- "../../Data/X041_downsampled_200M/all_metadata/"
+filt_meta_dir <- "../../Data/X041_downsampled_200M/filtered_metadata/"
+fragments_dir <- "../../Data/X041_downsampled_200M/filtered_fragments/"
+failed_fragments_dir <- "../../Data/X041_downsampled_200M/failed_fragments/"
+well_colors <- read.csv("../common/x041_well_colors.csv")
+```
+
+Selected wells:  
+X041-AP0C1W1, X041_aifi-nuclei-facs-unsorted, nuclear prep with standard 10x protocol  
+X041-AP0C1W2, X041_aifi-nuclei-facs-sort-dd, nuclear prep with 10x protocol and FACS to remove debris and dead cells  
+X041-AP0C1W3, X041_aifi-nuclei-facs-sort-neu-dd, nuclear prep with 10x protocol and FACS to remove neutrophils, debris, and dead cells  
+X041-AP0C1W4, X041_aifi-perm-facs-unsorted, perm cell prep with no FACS  
+X041-AP0C1W5, X041_aifi-perm-facs-sort-dd, perm cell prep with FACS to remove debris and dead cells
+X041-AP0C1W6, X041_aifi-perm-facs-sort-neu-dd, perm cell prep with FACS to remove neutrophils, debris, and dead cells
+```{r}
+wells_to_process <- list(nuc_no_facs = "X041_aifi-nuclei-facs-unsorted",
+                         nuc_dd_facs = "X041_aifi-nuclei-facs-sort-dd",
+                         nuc_ndd_facs = "X041_aifi-nuclei-facs-sort-neu-dd",
+                         pc_no_facs = "X041_aifi-perm-facs-unsorted",
+                         pc_dd_facs = "X041_aifi-perm-facs-sort-dd",
+                         pc_ndd_facs = "X041_aifi-perm-facs-sort-neu-dd")
+well_labels <- c("Nuclei: Unsorted",
+                 "Nuclei: No Dead/Debris",
+                 "Nuclei: No Neutrophils",
+                 "Perm: Unsorted",
+                 "Perm: No Dead/Debris",
+                 "Perm: No Neutrophils")
+```
+
+Locate files
+```{r}
+full_meta_files <- map2(full_meta_dir, wells_to_process, list.files, full.names = TRUE)
+filt_meta_files <- map2(filt_meta_dir, wells_to_process, list.files, full.names = TRUE)
+fragment_files <- map2(fragments_dir, wells_to_process, list.files, full.names = TRUE)
+fragment_files <- map(fragment_files, function(filenames) {filenames[!grepl(".tbi$", filenames)]})
+failed_fragment_files <- map2(failed_fragments_dir, wells_to_process, list.files, full.names = TRUE)
+failed_fragment_files <- map(failed_fragment_files, function(filenames) {filenames[!grepl(".tbi$", filenames)]})
+```
+
+Display inputs
+```{r}
+print("Full Metadata Files:")
+print(unlist(full_meta_files))
+```
+
+```{r}
+print("Filtered Metadata Files:")
+print(unlist(filt_meta_files))
+```
+```{r}
+print("Filtered Fragment Files:")
+print(unlist(fragment_files))
+```
+```{r}
+print("Failed Fragment Files:")
+print(unlist(failed_fragment_files))
+```
+
+Read Peaks
+```{r}
+peaks_file <- system.file("reference/hg38_peaks_gr.rds", package = "ATAComb")
+peaks_gr <- readRDS(peaks_file)
+```
+
+
+Read metadata files
+```{r message=FALSE}
+full_meta_list <- map(full_meta_files, fread)
+filt_meta_list <- map(filt_meta_files, fread)
+```
+
+
+## Reads vs FRIP plots
+
+Flag full metadata cells that pass or fail filtering
+```{r}
+full_meta_list <- map2(full_meta_list, filt_meta_list,
+                       function(full, filt) {
+                         full %>%
+                           mutate(pass_fail = ifelse(barcodes %in% filt$barcodes,
+                                                     "Pass", "Fail"))
+                       })
+```
+
+## Read fragments
+```{r}
+pass_fragment_list <- map(fragment_files,
+                          fread,
+                          col.names = c("seqnames","start","end","barcodes","count"))
+names(pass_fragment_list) <- well_labels
+fail_fragment_list <- map(failed_fragment_files,
+                          fread,
+                          col.names = c("seqnames","start","end","barcodes","count"))
+names(fail_fragment_list) <- well_labels
+```
+## Convert to GRanges
+```{r}
+pass_gr_list <- map(pass_fragment_list,
+                    function(frags) {
+                      GRanges(seqnames = frags$seqnames,
+                              IRanges(start = frags$start,
+                                      end = frags$end),
+                              barcodes = frags$barcodes)
+                    })
+fail_gr_list <- map(fail_fragment_list,
+                    function(frags) {
+                      GRanges(seqnames = frags$seqnames,
+                              IRanges(start = frags$start,
+                                      end = frags$end),
+                              barcodes = frags$barcodes)
+                    })
+```
+
+## Filter for peak overlaps
+```{r}
+pass_peaks_gr <- map(pass_gr_list,
+                     filter_gr,
+                     peaks_gr,
+                     mode = "keep")
+pass_nonpeaks_gr <- map(pass_gr_list,
+                        filter_gr,
+                        peaks_gr,
+                        mode = "remove")
+
+fail_peaks_gr <- map(fail_gr_list,
+                     filter_gr,
+                     peaks_gr,
+                     mode = "keep")
+fail_nonpeaks_gr <- map(fail_gr_list,
+                        filter_gr,
+                        peaks_gr,
+                        mode = "remove")
+```
+
+
+## Fragment size distributions
+
+```{r}
+gr_width_summary <- function(gr, wl, pf, loc) {
+  df <- as.data.frame(table(width(gr)))
+  names(df) <- c("width", "count")
+  df$width <- as.numeric(as.character(df$width))
+  df$frac <- df$count / sum(df$count)
+  df$well_label <- wl
+  df$pass_fail <- pf
+  df$loc <- loc
+  df
+}
+
+pass_peaks_sizes <-map2(pass_peaks_gr, well_labels,
+                        gr_width_summary,
+                        pf = "Pass", loc = "peaks")
+pass_nonpeaks_sizes <-map2(pass_nonpeaks_gr, well_labels,
+                           gr_width_summary,
+                           pf = "Pass", loc = "nonpeaks")
+fail_peaks_sizes <-map2(fail_peaks_gr, well_labels,
+                        gr_width_summary,
+                        pf = "Fail", loc = "peaks")
+fail_nonpeaks_sizes <-map2(fail_nonpeaks_gr, well_labels,
+                           gr_width_summary,
+                           pf = "Fail", loc = "nonpeaks")
+```
+
+Build Plots
+```{r}
+frag_length_plots <- pmap(list(pass_peaks_sizes, pass_nonpeaks_sizes,
+                               fail_peaks_sizes, fail_nonpeaks_sizes,
+                               well_labels),
+                          function(pp, pnp, fp, fnp, well_label) {
+                            dfs <- list(pp, pnp, fp, fnp)
+                            clrs <- c("#27AAE1","#27AAE1","#BE1E2D","#BE1E2D")
+                            map2(dfs, clrs,
+                                function(df, clr) {
+                                  ggplot(df) +
+                                    geom_line(aes(x = width,
+                                                  y = frac),
+                                                  color = clr) +
+                                    scale_x_continuous("Fragment length",
+                                                       limits = c(0,500)) +
+                                    scale_y_continuous("Frac. reads") +
+                                    theme_bw(base_size = 7) +
+                                    theme(legend.position = "none",
+                                          panel.grid.major = element_line(colour = "gray80",
+                                                                          size = 0.2),
+                                          panel.grid.minor = element_blank(),
+                                          panel.border = element_blank(),
+                                          axis.ticks = element_blank(),
+                                          axis.text = element_text(colour = "black")) +
+                                    ggtitle(paste(df$well_label, df$pass_fail, df$loc))
+                                })
+                          })
+frag_length_plots <- unlist(frag_length_plots, recursive = FALSE)
+```
+
+```{r}
+fragment_length_plot_grid <- plot_grid(plotlist = frag_length_plots, ncol = 4)
+```
+
+```{r fig.width = 7.5, fig.height = 6}
+fragment_length_plot_grid
+```
+
+### Frag category stats
+
+Fraction Summary
+```{r}
+mn_cut <- 120
+dn_cut <- 280
+
+all_sizes <- list(pass_peaks_sizes, pass_nonpeaks_sizes,
+                  fail_peaks_sizes, fail_nonpeaks_sizes)
+all_sizes <- lapply(all_sizes,
+                    function(l) { do.call(rbind, l) })
+all_sizes <- do.call(rbind, all_sizes)
+
+all_sizes <- all_sizes %>%
+  mutate(cat = case_when(width <= 120 ~ "0_open",
+                         width > 120 & width <= 280 ~ "1_mono",
+                         width > 280 ~ "2_dinuc"))
+
+size_summary <- all_sizes %>%
+  group_by(well_label, pass_fail, loc, cat) %>%
+  summarise(n_frags = sum(count)) %>%
+  group_by(well_label, pass_fail, loc) %>%
+  mutate(frac_frags = n_frags / sum(n_frags)) %>%
+  arrange(well_label, desc(pass_fail), desc(loc), cat)
+
+size_summary
+```
+
+Simple fraction barplots
+```{r fig.width = 4, fig.height = 4}
+ggplot(size_summary) +
+  geom_bar(aes(y = paste(well_label, pass_fail, loc),
+               x = frac_frags,
+               fill = cat),
+           stat = "identity",
+           position = position_stack(reverse = TRUE)) +
+  scale_fill_manual("Category",
+                    breaks = c("0_open", "1_mono","2_dinuc"),
+                    labels = c("Open","Mono","Di+"),
+                    values = c("gray60","gray40","gray20")) +
+  scale_y_discrete("") +
+  scale_x_continuous("Fraction of Unique Fragments",
+                     expand = c(0,0)) +
+  theme_bw(base_size = 7) +
+  theme(legend.position = "right",
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text = element_text(colour = "black"))
+```
+
+
+Chi-square tests
+```{r}
+chisq_mats <- map(well_labels,
+                  function(wl) {
+                    well_summary <- size_summary %>%
+                      filter(well_label == wl)
+                    well_mat <- matrix(well_summary$n_frags,
+                           ncol = 2, nrow = 3)
+                    rownames(well_mat) <- c("0_open","1_mono","2_dinuc")
+                    colnames(well_mat) <- c("Fail","Pass")
+                    well_mat
+                  })
+
+chisq_res <- map(chisq_mats,
+                 chisq.test)
+```
+
+### Pileups based on size and pass-fail/peaks categories
+
+```{r}
+pass_fail_gr_list <- list(pass_peaks = pass_peaks_gr,
+                          pass_nonpeaks = pass_nonpeaks_gr,
+                          fail_peaks = fail_peaks_gr,
+                          fail_nonpeaks = fail_nonpeaks_gr)
+
+open_pass_fail_gr_list <- map(pass_fail_gr_list,
+                              function(gr_list) {
+                                map(gr_list,
+                                    function(gr) {
+                                      gr[width(gr) <= mn_cut]
+                                    })
+                              })
+
+mono_pass_fail_gr_list <- map(pass_fail_gr_list,
+                              function(gr_list) {
+                                map(gr_list,
+                                    function(gr) {
+                                      gr[width(gr) > mn_cut & width(gr) <= dn_cut]
+                                    })
+                              })
+
+long_pass_fail_gr_list <- map(pass_fail_gr_list,
+                              function(gr_list) {
+                                map(gr_list,
+                                    function(gr) {
+                                      gr[width(gr) > dn_cut]
+                                    })
+                              })
+```
+
+```{r}
+tss_2kb_file <- system.file("reference/hg38_tss_gr.rds", package = "ATAComb")
+tss_2kb <- readRDS(tss_2kb_file)
+```
+
+```{r}
+all_regions <- unlist(list(open = open_pass_fail_gr_list,
+                           mono = mono_pass_fail_gr_list,
+                           long = long_pass_fail_gr_list))
+
+tss_regions <- map(all_regions,
+                   filter_gr,
+                   target_gr = tss_2kb,
+                   mode = "keep")
+
+if(!file.exists("Figure_1_category_tss_pileups_list.rds")) {
+  tss_pileups <- map(tss_regions,
+                     function(fragments) {
+                       pileup_fragments(query_gr = fragments,
+                                        target_gr = tss_2kb,
+                                        target_width = 4000)
+                     })
+  saveRDS(tss_pileups,
+          "Figure_1_category_tss_pileups_list.rds")
+} else {
+  tss_pileups <- readRDS("Figure_1_category_tss_pileups_list.rds")
+}
+```
+
+```{r}
+tss_pileup_df <- map2_dfr(tss_pileups, names(tss_pileups),
+                          function(tss_pileup, pile_name) {
+                            name_split <- strsplit(pile_name, "\\.")[[1]]
+                            tss_pileup$size_cat <- name_split[1]
+                            tss_pileup$pass_fail <- sub("_.+","",name_split[2])
+                            tss_pileup$peak_cat <- sub(".+_","",name_split[2])
+                            tss_pileup$well_label <- name_split[3]
+                            tss_pileup$frac_max <- tss_pileup$cov / max(tss_pileup$cov)
+                            tss_pileup
+                          })
+```
+
+# Arrange factor levels so plots are arranged appropriately
+```{r}
+tss_pileup_df$size_cat <- factor(tss_pileup_df$size_cat,
+                                 levels = c("open","mono","long"))
+tss_pileup_df$well_label <- factor(tss_pileup_df$well_label,
+                                   levels = c("Nuclei: Unsorted","Nuclei: No Dead/Debris","Nuclei: No Neutrophils",
+                                              "Perm: Unsorted","Perm: No Dead/Debris","Perm: No Neutrophils"))
+
+well_colors$well_label <- factor(well_colors$well_label,
+                                   levels = c("Nuclei: Unsorted","Nuclei: No Dead/Debris","Nuclei: No Neutrophils",
+                                              "Perm: Unsorted","Perm: No Dead/Debris","Perm: No Neutrophils"))
+
+filtered_tss_pileup_df <- tss_pileup_df %>%
+  group_by(well_label, size_cat, pass_fail, pos) %>%
+  summarise(cov = sum(cov)) %>%
+  group_by(well_label, size_cat, pass_fail) %>%
+  mutate(frac_max = cov / max(cov)) %>%
+  left_join(well_colors) %>%
+  mutate(plot_color = ifelse(pass_fail == "pass", well_color, "#404040"))
+```
+
+
+```{r fig.width = 5, fig.height = 5}
+tss_fragment_coverage_plot <- ggplot(data = filtered_tss_pileup_df) +
+  geom_vline(aes(xintercept = 2000),
+             size = 0.5,
+             color = "black") +
+  geom_line(aes(x = pos,
+                y = cov,
+                group = paste(size_cat, pass_fail, well_label),
+                color = plot_color),
+            size = 0.5) +
+  scale_color_identity() +
+  facet_grid(rows = vars(well_label),
+             cols = vars(size_cat),
+             scales = "free_y") +
+  scale_y_continuous("Total fragment coverage",
+                     limits = c(0, 4e6)) +
+  scale_x_continuous("Position Relative to TSS",
+                     limits = c(1250, 2750),
+                     breaks = seq(1250, 2750, 250),
+                     labels = seq(-750, 750, 250)) +
+  theme_bw(base_size = 7) +
+  theme(panel.grid.major = element_line(colour = "gray80",
+                                        size = 0.2),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text = element_text(colour = "black"),
+        axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.3))
+
+tss_fragment_coverage_plot
+```
+
+```{r}
+ggsave("Supp_Fig_4_unscaled_tss_fragment_coverage_plot.pdf",
+       tss_fragment_coverage_plot,
+       width = 4, height = 4,
+       useDingbats = FALSE)
+```
+
+
+
+```{r fig.width = 5, fig.height = 5}
+max_value_df <- filtered_tss_pileup_df %>%
+  group_by(well_label, size_cat, pass_fail, plot_color) %>%
+  summarise(max_cov = max(cov)) %>%
+  mutate(max_cov_label = formatC(max_cov, format = "e", digits = 2))
+
+pass_max_df <- max_value_df %>%
+  filter(pass_fail == "Pass")
+fail_max_df <- max_value_df %>%
+  filter(pass_fail == "Fail")
+
+scaled_tss_fragment_coverage_plot <- ggplot(data = filtered_tss_pileup_df) +
+  geom_vline(aes(xintercept = 2000),
+             size = 0.5,
+             color = "black") +
+  # geom_text(data = pass_max_df,
+  #           aes(x = 2250,
+  #               y = 0.9,
+  #               label = paste0("max: max_cov_label")),
+  #           color = " skyblue") +
+  geom_line(aes(x = pos,
+                y = frac_max,
+                group = paste(size_cat, pass_fail, well_label),
+                color = plot_color),
+            size = 0.5) +
+  scale_color_identity() +
+  facet_grid(rows = vars(well_label),
+             cols = vars(size_cat),
+             scales = "free_y") +
+  ylab("Fraction of max coverage") +
+  scale_x_continuous("Pos. Relative to TSS",
+                     limits = c(1250, 2750),
+                     breaks = seq(1250, 2750, 250),
+                     labels = seq(-750, 750, 250)) +
+  theme_bw(base_size = 7) +
+  theme(panel.grid.major = element_line(colour = "gray80",
+                                        size = 0.2),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text = element_text(colour = "black"),
+        axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.3))
+
+scaled_tss_fragment_coverage_plot
+```
+
+```{r}
+ggsave("Supp_Fig_4_scaled_tss_fragment_coverage_plot.pdf",
+       scaled_tss_fragment_coverage_plot,
+       width = 4, height = 4,
+       useDingbats = FALSE)
+```
+
+
+
+```{r}
+sessionInfo()
+```

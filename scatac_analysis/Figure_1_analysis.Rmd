@@ -1,0 +1,1374 @@
+---
+title: "Figure 1 analysis"
+author: "Lucas Graybuck"
+date: "5/27/2020"
+output: html_document
+---
+
+## Setup
+
+Load Packages
+```{r}
+quiet_library <- function(...) {
+  suppressPackageStartupMessages(library(...))
+}
+
+quiet_library(data.table)
+quiet_library(readr)
+quiet_library(dplyr)
+quiet_library(purrr)
+quiet_library(ggplot2)
+quiet_library(ggrastr)
+quiet_library(cowplot)
+quiet_library(patchwork)
+quiet_library(GenomicRanges)
+options(stringsAsFactors = FALSE)
+source("../common/granges_helpers.R")
+```
+
+Source directories
+```{r}
+full_meta_dir <- "../../Data/X041_downsampled_200M/all_metadata/"
+filt_meta_dir <- "../../Data/X041_downsampled_200M/filtered_metadata/"
+fragments_dir <- "../../Data/X041_downsampled_200M/filtered_fragments/"
+failed_fragments_dir <- "../../Data/X041_downsampled_200M/failed_fragments/"
+singlecell_dir <- "../../Data/X041_downsampled_200M/singlecell/"
+```
+
+Selected wells:  
+X041-AP0C1W1, X041_aifi-nuclei-facs-unsorted, nuclear prep with standard 10x protocol  
+X041-AP0C1W2, X041_aifi-nuclei-facs-sort-dd, nuclear prep with 10x protocol and FACS to remove debris and dead cells  
+X041-AP0C1W3, X041_aifi-nuclei-facs-sort-neu-dd, nuclear prep with 10x protocol and FACS to remove neutrophils, debris, and dead cells  
+X041-AP0C1W4, X041_aifi-perm-facs-unsorted, perm cell prep with no FACS  
+X041-AP0C1W5, X041_aifi-perm-facs-sort-dd, perm cell prep with FACS to remove debris and dead cells
+X041-AP0C1W6, X041_aifi-perm-facs-sort-neu-dd, perm cell prep with FACS to remove neutrophils, debris, and dead cells
+```{r}
+wells_to_process <- list(nuc_no_facs = "X041_aifi-nuclei-facs-unsorted",
+                         nuc_dd_facs = "X041_aifi-nuclei-facs-sort-dd",
+                         nuc_ndd_facs = "X041_aifi-nuclei-facs-sort-neu-dd",
+                         pc_no_facs = "X041_aifi-perm-facs-unsorted",
+                         pc_dd_facs = "X041_aifi-perm-facs-sort-dd",
+                         pc_ndd_facs = "X041_aifi-perm-facs-sort-neu-dd")
+well_labels <- c("Nuclei: Unsorted",
+                 "Nuclei: No Dead/Debris",
+                 "Nuclei: No Neutrophils",
+                 "Perm: Unsorted",
+                 "Perm: No Dead/Debris",
+                 "Perm: No Neutrophils")
+well_colors <- read.csv("../common/x041_well_colors.csv") %>%
+  arrange(well_id) %>%
+  mutate(errorbar_color = c("gray80","black","black","gray80","black","black"))
+```
+
+Locate files
+```{r}
+full_meta_files <- map2(full_meta_dir, wells_to_process, list.files, full.names = TRUE)
+filt_meta_files <- map2(filt_meta_dir, wells_to_process, list.files, full.names = TRUE)
+fragment_files <- map2(fragments_dir, wells_to_process, list.files, full.names = TRUE)
+fragment_files <- map(fragment_files, function(filenames) {filenames[!grepl(".tbi$", filenames)]})
+failed_fragment_files <- map2(failed_fragments_dir, wells_to_process, list.files, full.names = TRUE)
+failed_fragment_files <- map(failed_fragment_files, function(filenames) {filenames[!grepl(".tbi$", filenames)]})
+singlecell_files <- map2(singlecell_dir, wells_to_process, list.files, full.names = TRUE)
+```
+
+Display inputs
+```{r}
+print("Full Metadata Files:")
+print(unlist(full_meta_files))
+```
+
+```{r}
+print("Filtered Metadata Files:")
+print(unlist(filt_meta_files))
+```
+```{r}
+print("Filtered Fragment Files:")
+print(unlist(fragment_files))
+```
+```{r}
+print("Failed Fragment Files:")
+print(unlist(failed_fragment_files))
+```
+```{r}
+print("10x singlecell.csv Files:")
+print(unlist(singlecell_files))
+```
+
+
+Read metadata files
+```{r message=FALSE}
+full_meta_list <- map(full_meta_files, read_csv)
+filt_meta_list <- map(filt_meta_files, read_csv)
+```
+
+
+## Reads vs FRIP plots
+
+Flag full metadata cells that pass or fail filtering
+```{r}
+full_meta_list <- map2(full_meta_list, filt_meta_list,
+                       function(full, filt) {
+                         full %>%
+                           mutate(pass_fail = ifelse(barcodes %in% filt$barcodes,
+                                                     "Pass", "Fail"))
+                       })
+```
+
+Generate depth vs FRIP plots
+```{r}
+reads_vs_frip_plotlist <- map2(full_meta_list, well_labels,
+                               function(meta, label) {
+                                 well_color <- well_colors$well_color[well_colors$well_label == label]
+                                 
+                                 ggplot(meta) +
+                                   geom_point_rast(aes(x = n_unique,
+                                                       y = peaks_frac,
+                                                       color = pass_fail),
+                                                   size = 0.5,
+                                                   raster.dpi = 150) +
+                                   scale_color_manual(breaks = c("Fail","Pass"),
+                                                      values = c("#404040",well_color)) +
+                                   scale_x_log10(limits = c(8e2, 2e5),
+                                                 breaks = c(1e3, 1e4, 1e5),
+                                                 labels = c("1k", "10k", "100k"),
+                                                 expand = c(0,0)) +
+                                   xlab(bquote(log[10]("Unique Reads"))) +
+                                   scale_y_continuous("",
+                                                      limits = c(0, 1),
+                                                      expand = c(0,0)) +
+                                   theme_bw(base_size = 6) +
+                                   theme(legend.position = "none",
+                                         panel.grid.major = element_line(colour = "gray80",
+                                                                         size = 0.2),
+                                         panel.grid.minor = element_blank(),
+                                         panel.border = element_blank(),
+                                         axis.ticks = element_blank(),
+                                         axis.text = element_text(colour = "black")) +
+                                   ggtitle(label)
+                               })
+```
+
+Preview depth vs FRIP plots
+```{r fig.width = 7.4, fig.height = 1.5}
+reads_vs_frip_plot_grid <- plot_grid(plotlist = reads_vs_frip_plotlist,
+                                     ncol = 6)
+reads_vs_frip_plot_grid
+```
+
+
+Save plots
+```{r}
+ggsave("Figure_1B_reads_vs_frip_plot.pdf",
+       width = 7.5, height = 1.5,
+       useDingbats = FALSE)
+```
+
+
+Generate depth vs FRIP plots
+```{r}
+reads_vs_frip_plotlist_alpha <- map2(full_meta_list, well_labels,
+                                     function(meta, label) {
+                                       well_color <- well_colors$well_color[well_colors$well_label == label]
+                                       
+                                       ggplot(meta) +
+                                         geom_point_rast(aes(x = n_unique,
+                                                             y = peaks_frac,
+                                                             color = pass_fail),
+                                                         size = 0.5,
+                                                         alpha = 0.2,
+                                                         raster.dpi = 72) +
+                                         scale_color_manual(breaks = c("Fail","Pass"),
+                                                            values = c("#404040",well_color)) +
+                                         scale_x_log10(limits = c(8e2, 2e5),
+                                                       breaks = c(1e3, 1e4, 1e5),
+                                                       labels = c("1k", "10k", "100k"),
+                                                       expand = c(0,0)) +
+                                         xlab(bquote(log[10]("Unique Reads"))) +
+                                         scale_y_continuous("",
+                                                            limits = c(0, 1),
+                                                            expand = c(0,0)) +
+                                         theme_bw(base_size = 6) +
+                                         theme(legend.position = "none",
+                                               panel.grid.major = element_line(colour = "gray80",
+                                                                               size = 0.2),
+                                               panel.grid.minor = element_blank(),
+                                               panel.border = element_blank(),
+                                               axis.ticks = element_blank(),
+                                               axis.text = element_text(colour = "black")) +
+                                         ggtitle(label)
+                                     })
+```
+
+Preview depth vs FRIP plots
+```{r fig.width = 7.4, fig.height = 1.5}
+reads_vs_frip_plot_grid_alpha <- plot_grid(plotlist = reads_vs_frip_plotlist_alpha,
+                                           ncol = 6)
+reads_vs_frip_plot_grid_alpha
+```
+
+
+Legend stats:
+```{r}
+reads_vs_frip_barcode_summary <- map2_dfr(full_meta_list, well_labels,
+                                          function(meta, label) {
+                                            data.frame(experiment = label,
+                                                       n_barcodes = nrow(meta),
+                                                       n_pass = sum(meta$pass_fail == "Pass"),
+                                                       n_fail = sum(meta$pass_fail == "Fail"),
+                                                       frac_pass = sum(meta$pass_fail == "Pass") / nrow(meta))
+                                          })
+reads_vs_frip_barcode_summary
+```
+## Fragment size distributions
+
+Fragments in barcodes that pass QC
+```{r message=FALSE}
+passed_fragment_length_distributions <- map(fragment_files,
+                                            function(fragment_file) {
+                                              print(paste("Tabulating widths for",fragment_file))
+                                              
+                                              frags_df <- read_tsv(fragment_file, 
+                                                                   col_names = c("seqnames","start","end","barcodes","count"))
+                                              frags_df$width <- frags_df$end - frags_df$start
+                                              frag_width_table <- frags_df %>%
+                                                group_by(width) %>%
+                                                summarise(count = n()) %>%
+                                                ungroup()
+                                              frag_width_table$frac <- frag_width_table$count / sum(frag_width_table$count)
+                                              frag_width_table
+                                            })
+```
+
+Fragments in barcodes that fail QC
+```{r message=FALSE}
+failed_fragment_length_distributions <- map(failed_fragment_files,
+                                            function(fragment_file) {
+                                              print(paste("Tabulating widths for",fragment_file))
+                                              
+                                              frags_df <- read_tsv(fragment_file, 
+                                                                   col_names = c("seqnames","start","end","barcodes","count"))
+                                              frags_df$width <- frags_df$end - frags_df$start
+                                              frag_width_table <- frags_df %>%
+                                                group_by(width) %>%
+                                                summarise(count = n()) %>%
+                                                ungroup()
+                                              frag_width_table$frac <- frag_width_table$count / sum(frag_width_table$count)
+                                              frag_width_table
+                                            })
+```
+Build Plots
+```{r}
+frag_length_plots <- pmap(list(passed_fragment_length_distributions,
+                               failed_fragment_length_distributions,
+                               well_labels),
+                          function(passed_fragment_length_distribution,
+                                   failed_fragment_length_distributions,
+                                   well_label) {
+                            well_color <- well_colors$well_color[well_colors$well_label == well_label]
+                            
+                            passed_fragment_length_distribution$pass_fail <- "Pass"
+                            failed_fragment_length_distributions$pass_fail <- "Fail"
+                            dist_df <- rbind(passed_fragment_length_distribution,
+                                             failed_fragment_length_distributions)
+                            ggplot(dist_df) +
+                              geom_line(aes(x = width,
+                                            y = frac,
+                                            color = pass_fail)) +
+                              scale_color_manual(breaks = c("Fail","Pass"),
+                                                 values = c("#404040",well_color)) +
+                              scale_x_continuous("Fragment length",
+                                                 limits = c(0,500)) +
+                              scale_y_continuous("Frac. reads") +
+                              theme_bw(base_size = 7) +
+                              theme(legend.position = "none",
+                                    panel.grid.major = element_line(colour = "gray80",
+                                                                    size = 0.2),
+                                    panel.grid.minor = element_blank(),
+                                    panel.border = element_blank(),
+                                    axis.ticks = element_blank(),
+                                    axis.text = element_text(colour = "black"))
+                          })
+```
+
+```{r}
+fragment_length_plot_grid <- plot_grid(plotlist = frag_length_plots, ncol = 6)
+```
+
+```{r fig.width = 7.5, fig.height = 0.8}
+fragment_length_plot_grid
+```
+
+```{r}
+ggsave("Figure_1B_fragment_length_plot.pdf",
+       width = 7.5, height = 0.8,
+       useDingbats = FALSE)
+```
+
+
+Combined QC plot with distributions in a single grid
+```{r fig.width = 7.5, fig.height = 2.3}
+qc_fragment_grid <- plot_grid(plotlist = c(reads_vs_frip_plotlist_alpha,
+                                           frag_length_plots),
+                              ncol = 6, nrow = 2,
+                              rel_heights = c(1.5, 0.8))
+qc_fragment_grid
+```
+
+```{r}
+ggsave("Figure_1B_qc_frag_length_combined.pdf",
+       qc_fragment_grid,
+       width = 7.5, height = 2.3,
+       useDingbats = FALSE)
+```
+
+
+# standard vs clean perm cells only
+```{r}
+subset_qc_plots <- list(reads_vs_frip_plotlist_alpha[[1]],
+                        reads_vs_frip_plotlist_alpha[[6]],
+                        frag_length_plots[[1]],
+                        frag_length_plots[[6]])
+
+subset_qc_plots[[1]]$theme$text$size <- 9
+subset_qc_plots[[2]]$theme$text$size <- 9
+subset_qc_plots[[3]]$theme$text$size <- 9
+subset_qc_plots[[4]]$theme$text$size <- 9
+
+subset_qc_plots[[1]]$labels$title <- "Standard Protocol"
+subset_qc_plots[[2]]$labels$title <- "AIFI Protocol"
+```
+
+```{r fig.width = 6, fig.height = 4.6}
+subset_qc_grid <- plot_grid(plotlist = subset_qc_plots,
+                            ncol = 2, nrow = 2,
+                            rel_heights = c(1.5, 0.8))
+subset_qc_grid
+```
+```{r}
+ggsave("tenx_Figure_1B_qc_frag_length_combined.png",
+       subset_qc_grid,
+       width = 6, height = 4.6,
+       type = "cairo", dpi = 300)
+```
+
+
+
+## QC Metric violin plots
+
+```{r}
+metric_violin_plot <- function(meta,
+                               y_column,
+                               y_name,
+                               y_log10,
+                               y_range = NULL,
+                               x_column,
+                               x_color,
+                               x_order,
+                               x_name,
+                               eb_color) {
+  x_anno <- data.frame(x_values = x_order) %>%
+    mutate(xpos = 1:n())
+  
+  plot_data <- data.frame(y_values = meta[[y_column]],
+                          x_values = meta[[x_column]],
+                          x_colors = meta[[x_color]],
+                          eb_colors = meta[[eb_color]]) %>%
+    left_join(x_anno)
+  
+  med_data <- plot_data %>%
+    group_by(x_values, xpos, eb_colors) %>%
+    summarise(y_med = median(y_values),
+              y_q75 = quantile(y_values, 0.75),
+              y_q25 = quantile(y_values, 0.25))
+  
+  p <- ggplot() +
+    geom_violin(data = plot_data,
+                aes(x = xpos,
+                    y = y_values,
+                    fill = x_colors),
+                size = 0.1,
+                color = "black") +
+    geom_errorbar(data = med_data,
+                  aes(x = xpos,
+                      ymin = y_med,
+                      ymax = y_med,
+                      color = eb_colors),
+                  size = 0.4,
+                  width = 0.4) +
+    geom_errorbar(data = med_data,
+                  aes(x = xpos,
+                      ymin = y_q25,
+                      ymax = y_q75,
+                      color = eb_colors),
+                  size = 0.4,
+                  width = 0.2) +
+    scale_fill_identity() +
+    scale_color_identity() +
+    scale_x_continuous(x_name,
+                       breaks = x_anno$xpos,
+                       labels = x_anno$x_values) +
+    theme_bw(base_size = 7) +
+    theme(legend.position = "none",
+          panel.grid.major = element_line(colour = "gray80",
+                                          size = 0.2),
+          panel.grid.minor = element_blank(),
+          panel.border = element_blank(),
+          axis.ticks = element_blank(),
+          axis.text.x = element_blank(),
+          axis.text.y = element_text(colour = "black"))
+  
+  if(y_log10) {
+    if(is.null(y_range)) {
+      p <- p +
+        scale_y_log10(y_name)
+    } else {
+      p <- p +
+        scale_y_log10(y_name,
+                      limits = y_range)
+    }
+    
+  } else {
+    if(is.null(y_range)) {
+      p <- p +
+        scale_y_continuous(y_name)
+    } else {
+      p <- p +
+        scale_y_continuous(y_name,
+                           limits = y_range)
+    }
+  }
+  
+  p
+}
+
+```
+
+
+```{r}
+all_filt_meta <- do.call(rbind, filt_meta_list) %>%
+  left_join(well_colors) %>%
+  mutate(mito_perc = n_mito / n_fragments * 100)
+```
+
+```{r fig.width = 1.875, fig.height = 2}
+unique_violin_plot <- metric_violin_plot(all_filt_meta,
+                                         y_column = "n_unique",
+                                         y_name = "Log10(Unique Reads)",
+                                         y_log10 = TRUE,
+                                         y_range = c(1e3, 1e5),
+                                         x_column = "well_label",
+                                         x_color = "well_color",
+                                         x_order = well_colors$well_label,
+                                         x_name = "Experiment",
+                                         eb_color = "errorbar_color")
+```
+```{r fig.width = 1.875, fig.height = 2}
+mito_violin_plot <- metric_violin_plot(all_filt_meta,
+                                       y_column = "mito_perc",
+                                       y_name = "Percent Mitochondrial",
+                                       y_log10 = FALSE,
+                                       y_range = c(0, 10),
+                                       x_column = "well_label",
+                                       x_color = "well_color",
+                                       x_order = well_colors$well_label,
+                                       x_name = "Experiment",
+                                       eb_color = "errorbar_color")
+```
+```{r fig.width = 1.875, fig.height = 2}
+fritss_tss_violin_plot <- metric_violin_plot(all_filt_meta,
+                                             y_column = "tss_frac",
+                                             y_name = "FRITSS",
+                                             y_log10 = FALSE,
+                                             y_range = c(0, 1),
+                                             x_column = "well_label",
+                                             x_color = "well_color",
+                                             x_order = well_colors$well_label,
+                                             x_name = "Experiment",
+                                             eb_color = "errorbar_color")
+```
+```{r fig.width = 1.875, fig.height = 2}
+frip_violin_plot <- metric_violin_plot(all_filt_meta,
+                                       y_column = "peaks_frac",
+                                       y_name = "FRIP",
+                                       y_log10 = FALSE,
+                                       y_range = c(0, 1),
+                                       x_column = "well_label",
+                                       x_color = "well_color",
+                                       x_order = well_colors$well_label,
+                                       x_name = "Experiment",
+                                       eb_color = "errorbar_color")
+```
+
+```{r fig.width = 1.875, fig.height = 2}
+rip_violin_plot <- metric_violin_plot(all_filt_meta,
+                                       y_column = "tss_count",
+                                       y_name = "Reads in TSS",
+                                       y_log10 = TRUE,
+                                       x_column = "well_label",
+                                       x_color = "well_color",
+                                       x_order = well_colors$well_label,
+                                       x_name = "Experiment",
+                                       eb_color = "errorbar_color")
+
+```
+
+```{r fig.width = 7.5, fig.height = 1.5}
+violin_grid <- plot_grid(plotlist = list(unique_violin_plot,
+                                         mito_violin_plot,
+                                         fritss_tss_violin_plot,
+                                         frip_violin_plot),
+                         ncol = 4)
+violin_grid
+```
+
+```{r}
+ggsave("Fig1E_violin_plots.pdf",
+       violin_grid,
+       width = 7.5,
+       height = 1.5,
+       useDingbats = FALSE)
+```
+
+
+## TSS and CTCF plots
+```{r}
+tss_2kb_file <- system.file("reference/hg38_tss_gr.rds", package = "ATAComb")
+tss_2kb <- readRDS(tss_2kb_file)
+```
+
+
+```{r}
+ctcf_file <- "../common/hg38.CTCF_motifs.v1.0_altius.overlap_top100k.bed.gz"
+ctcf_motifs <- fread(ctcf_file)
+names(ctcf_motifs) <- c("seqnames","start","end",
+                        "name","score","strand",
+                        "best_model","num_models")
+ctcf_motifs <- GRanges(seqnames = ctcf_motifs$seqnames,
+                       IRanges(start = ctcf_motifs$start,
+                               end = ctcf_motifs$end),
+                       strand = ctcf_motifs$strand)
+```
+
+```
+{r}
+ex1_file <- "../common/hg38_exon1_boundary_gr.rds"
+ex1_gr <- readRDS(ex1_file)
+ex1_gr <- GenomicRanges::resize(ex1_gr, width = 4000, fix = "center")
+```
+
+
+```{r message=FALSE}
+if(!file.exists("Figure_1_tss_fragment_list.rds")){
+  tss_fragment_list <- map(fragment_files,
+                           function(fragment_file) {
+                             print(paste("Reading and filtering",fragment_file))
+                             
+                             frags_df <- read_tsv(fragment_file, 
+                                                  col_names = c("seqnames","start","end","barcodes","count"))
+                             frags_gr <- GRanges(seqnames = frags_df$seqnames,
+                                                 IRanges(frags_df$start, frags_df$end))
+                             tss_frags_gr <- filter_gr(frags_gr,
+                                                       tss_2kb,
+                                                       mode = "keep")
+                             tss_frags_gr
+                           })
+  saveRDS(tss_fragment_list,
+          "Figure_1_tss_fragment_list.rds")
+} else {
+  tss_fragment_list <- readRDS("Figure_1_tss_fragment_list.rds")
+}
+```
+
+### Pileups using fragments
+
+Generate TSS pileups
+```{r}
+if(!file.exists("Figure_1_tss_pileups_list.rds")) {
+  tss_pileups <- map(tss_fragment_list,
+                     function(tss_fragments) {
+                       pileup_fragments(query_gr = tss_fragments,
+                                        target_gr = tss_2kb,
+                                        target_width = 4000)
+                     })
+  saveRDS(tss_pileups,
+          "Figure_1_tss_pileups_list.rds")
+} else {
+  tss_pileups <- readRDS("Figure_1_tss_pileups_list.rds")
+}
+```
+
+Plot TSS pileups
+```{r}
+tss_pileup_df <- map2_dfr(tss_pileups, well_labels,
+                          function(tss_pileup, well_label) {
+                            tss_pileup$well_label <- well_label
+                            tss_pileup
+                          })
+
+tss_pileup_df <- tss_pileup_df %>%
+  left_join(well_colors)
+norm_tss_pileup_df <- pmap_dfr(list(tss_pileups, well_labels, filt_meta_list),
+                               function(tss_pileup, well_label, filt_meta) {
+                                 M_unique_frags <- sum(filt_meta$n_unique)/1e6
+                                 tss_pileup$well_label <- well_label
+                                 tss_pileup$cov <- tss_pileup$cov / M_unique_frags
+                                 tss_pileup
+                               })
+norm_tss_pileup_df <- norm_tss_pileup_df %>%
+  left_join(well_colors)
+```
+
+```{r}
+unnormalized_tss_pileup_plot <- ggplot(data = tss_pileup_df) +
+  geom_line(aes(x = pos, y = cov,
+                group = well_label,
+                color = well_color),
+            size = 1) +
+  scale_color_identity() +
+  ylab("Total fragment coverage") +
+  scale_x_continuous("Pos. Relative to TSS",
+                     breaks = seq(0, 4000, 1000),
+                     labels = seq(-2000, 2000, 1000)) +
+  theme_bw(base_size = 7) +
+  theme(panel.grid.major = element_line(colour = "gray80",
+                                        size = 0.2),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text = element_text(colour = "black"))
+
+normalized_tss_pileup_plot <- ggplot(data = norm_tss_pileup_df) +
+  geom_line(aes(x = pos, y = cov,
+                group = well_label,
+                color = well_color),
+            size = 1) +
+  scale_color_identity() +
+  ylab("Fragment overlaps per million") +
+  scale_x_continuous("Pos. Relative to TSS",
+                     breaks = seq(0, 4000, 1000),
+                     labels = seq(-2000, 2000, 1000)) +
+  theme_bw(base_size = 7) +
+  theme(panel.grid.major = element_line(colour = "gray80",
+                                        size = 0.2),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text = element_text(colour = "black"))
+```
+
+```{r fig.width = 5, fig.height = 2}
+tss_pileup_grid <- plot_grid(unnormalized_tss_pileup_plot, 
+                             normalized_tss_pileup_plot,
+                             ncol = 2)
+tss_pileup_grid
+```
+
+```{r}
+split_unnorm_pileup_plot <- ggplot(data = tss_pileup_df) +
+  geom_vline(aes(xintercept = 2000),
+             color = "black",
+             size = 0.2) +
+  geom_line(aes(x = pos, y = cov,
+                group = well_label,
+                color = well_color),
+            size = 0.5) +
+  facet_grid(cols = vars(well_label)) +
+  scale_color_identity() +
+  scale_y_continuous("Total fragment coverage") +
+  scale_x_continuous("Pos. Relative to TSS",
+                     breaks = seq(0, 4000, 1000),
+                     labels = c("-2kb","-1kb","TSS","+1kb","+2kb")) +
+  theme_bw(base_size = 7) +
+  theme(panel.grid.major = element_line(colour = "gray80",
+                                        size = 0.2),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text = element_text(colour = "black"),
+        strip.background = element_blank())
+```
+
+```{r fig.width = 7.5, fig.height = 1.5}
+split_unnorm_pileup_plot
+```
+```{r}
+ggsave("Figure_1C_TSS_fragment_pileups_unnormalized_split.pdf",
+       split_unnorm_pileup_plot,
+       width = 7.5,
+       height = 1.5,
+       useDingbats = FALSE)
+```
+
+
+### Pileups using footprints
+```{r}
+if(!file.exists("Figure_1_tss_footprints_list.rds")) {
+  tss_footprints <- convert_fragment_list(tss_fragment_list,
+                                          to = "footprints")
+  saveRDS(tss_footprints,
+          "Figure_1_tss_footprints_list.rds")
+} else {
+  tss_footprints <- readRDS("Figure_1_tss_footprints_list.rds")
+}
+```
+
+Generate TSS pileups
+```{r}
+if(!file.exists("Figure_1_tss_footprint_pileups_list.rds")) {
+  tss_fp_pileups <- map(tss_footprints,
+                        function(tss_fragments) {
+                          pileup_fragments(query_gr = tss_fragments,
+                                           target_gr = tss_2kb,
+                                           target_width = 4000)
+                        })
+  saveRDS(tss_fp_pileups,
+          "Figure_1_tss_footprint_pileups_list.rds")
+} else {
+  tss_fp_pileups <- readRDS("Figure_1_tss_footprint_pileups_list.rds")
+}
+```
+Plot TSS pileups
+```{r}
+tss_fp_pileup_df <- map2_dfr(tss_fp_pileups, well_labels,
+                             function(tss_pileup, well_label) {
+                               tss_pileup$well_label <- well_label
+                               tss_pileup
+                             })
+tss_fp_pileup_df <- tss_fp_pileup_df %>%
+  left_join(well_colors)
+norm_tss_fp_pileup_df <- pmap_dfr(list(tss_fp_pileups, well_labels, filt_meta_list),
+                                  function(tss_pileup, well_label, filt_meta) {
+                                    tss_pileup$well_label <- well_label
+                                    tss_pileup$cov <- tss_pileup$cov / nrow(filt_meta)
+                                    tss_pileup
+                                  })
+norm_tss_fp_pileup_df <- norm_tss_fp_pileup_df %>%
+  left_join(well_colors)
+```
+
+```{r}
+unnormalized_tss_fp_pileup_plot <- ggplot(data = tss_fp_pileup_df) +
+  geom_hline(aes(yintercept = 0),
+             color = "black",
+             size = 0.2) +
+  geom_vline(aes(xintercept = 2000),
+             color = "black",
+             size = 0.2) +
+  geom_line(aes(x = pos, y = cov,
+                group = well_label,
+                color = well_color),
+            size = 0.5) +
+  scale_color_identity() +
+  scale_y_continuous("Total footprint coverage (Millions)",
+                     breaks = seq(0, 4e6, 1e6),
+                     labels = seq(0, 4, 1),
+                     expand = c(0,0)) +
+  scale_x_continuous("Pos. Relative to TSS",
+                     breaks = seq(0, 4000, 1000),
+                     labels = seq(-2000, 2000, 1000),
+                     expand = c(0,0)) +
+  theme_bw(base_size = 7) +
+  theme(panel.grid.major = element_line(colour = "gray80",
+                                        size = 0.2),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text = element_text(colour = "black"))
+
+normalized_tss_fp_pileup_plot <- ggplot(data = norm_tss_fp_pileup_df) +
+  geom_line(aes(x = pos, y = cov,
+                group = well_label,
+                color = well_color),
+            size = 0.5) +
+  scale_color_identity() +
+  ylab("Mean footprints per cell") +
+  scale_x_continuous("Pos. Relative to TSS",
+                     breaks = seq(0, 4000, 1000),
+                     labels = seq(-2000, 2000, 1000)) +
+  theme_bw(base_size = 7) +
+  theme(panel.grid.major = element_line(colour = "gray80",
+                                        size = 0.2),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text = element_text(colour = "black"))
+```
+
+```{r fig.width = 5, fig.height = 2}
+tss_fp_pileup_grid <- plot_grid(unnormalized_tss_fp_pileup_plot, 
+                                normalized_tss_fp_pileup_plot,
+                                ncol = 2)
+tss_fp_pileup_grid
+```
+
+```{r}
+ggsave("Figure_1C_joint_tss_footprint_pileup_total.pdf",
+       unnormalized_tss_fp_pileup_plot,
+       width = 2.2, height = 2
+)
+```
+
+
+```{r}
+split_unnorm_fp_pileup_plot <- ggplot(data = tss_fp_pileup_df) +
+  geom_vline(aes(xintercept = 2000),
+             color = "black",
+             size = 0.2) +
+  geom_line(aes(x = pos, y = cov,
+                group = well_label,
+                color = well_color),
+            size = 0.5) +
+  scale_color_identity() +
+  facet_grid(cols = vars(well_label)) +
+  scale_y_continuous("Tn5 footprint coverage") +
+  scale_x_continuous("Pos. Relative to TSS",
+                     limits = c(1000, 3000),
+                     breaks = seq(1000, 3000, 1000),
+                     labels = c("-1kb","TSS","+1kb")) +
+  theme_bw(base_size = 7) +
+  theme(panel.grid.major = element_line(colour = "gray80",
+                                        size = 0.2),
+        panel.grid.minor.y = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text = element_text(colour = "black"),
+        strip.background = element_blank(),
+        legend.position = "none")
+```
+
+```{r fig.width = 5, fig.height = 1.5}
+split_unnorm_fp_pileup_plot
+```
+
+```{r}
+ggsave("Figure_1C_TSS_footprint_pileups_unnormalized_split.pdf",
+       split_unnorm_fp_pileup_plot,
+       width = 5,
+       height = 1.5,
+       useDingbats = FALSE)
+```
+
+```{r}
+split_norm_fp_pileup_plot <- ggplot(data = norm_tss_fp_pileup_df) +
+  geom_vline(aes(xintercept = 2000),
+             color = "black",
+             size = 0.2) +
+  geom_line(aes(x = pos, y = cov,
+                group = well_label,
+                color = well_color),
+            size = 0.5) +
+  facet_grid(cols = vars(well_label)) +
+  scale_color_identity() +
+  scale_y_continuous("Avg. Tn5 FP per cell") +
+  scale_x_continuous("Pos. Relative to TSS",
+                     breaks = seq(0, 4000, 1000),
+                     labels = c("-2kb","-1kb","TSS","+1kb","+2kb")) +
+  theme_bw(base_size = 7) +
+  theme(panel.grid.major = element_line(colour = "gray80",
+                                        size = 0.2),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text = element_text(colour = "black"),
+        strip.background = element_blank())
+```
+
+```{r fig.width = 7.5, fig.height = 1.5}
+split_norm_fp_pileup_plot
+```
+
+```{r}
+ggsave("Figure_1C_TSS_footprint_pileups_normalized_split.pdf",
+       split_norm_fp_pileup_plot,
+       width = 7.5,
+       height = 1.5,
+       useDingbats = FALSE)
+```
+
+
+### CTCF analysis
+
+```{r message=FALSE}
+if(!file.exists("Figure_1_ctcf_fragment_list.rds")){
+  ctcf_fragment_list <- map(fragment_files,
+                            function(fragment_file) {
+                              print(paste("Reading and filtering",fragment_file))
+                              
+                              frags_df <- read_tsv(fragment_file, 
+                                                   col_names = c("seqnames","start","end","barcodes","count"))
+                              frags_gr <- GRanges(seqnames = frags_df$seqnames,
+                                                  IRanges(frags_df$start, frags_df$end))
+                              ctcf_frags_gr <- filter_gr(frags_gr,
+                                                         ctcf_motifs,
+                                                         mode = "keep")
+                              ctcf_frags_gr
+                            })
+  saveRDS(ctcf_fragment_list,
+          "Figure_1_ctcf_fragment_list.rds")
+} else {
+  ctcf_fragment_list <- readRDS("Figure_1_ctcf_fragment_list.rds")
+}
+```
+
+Convert to footprints, boundaries, and centers, and assemble all types so we can map across them.
+
+```{r}
+# Footprints
+ctcf_fp_list <- convert_fragment_list(ctcf_fragment_list,
+                                      to = "footprints")
+# Boundaries
+ctcf_bd_list <- convert_fragment_list(ctcf_fragment_list,
+                                      to = "boundaries")
+# Cut centers
+ctcf_cc_list <- convert_fragment_list(ctcf_fragment_list,
+                                      to = "cut_centers")
+
+all_ctcf_inserts <- list(fragments = ctcf_fragment_list,
+                         footprints = ctcf_fp_list,
+                         boundaries = ctcf_bd_list,
+                         cut_centers = ctcf_cc_list)
+
+range_types <- c("Fragments",
+                 "Tn5 Footprints",
+                 "Tn5 Boundaries",
+                 "Tn5 Centers")
+```
+
+
+### Pileups using fragments
+
+Generate CTCF pileups
+```{r}
+if(!file.exists("Figure_1_ctcf_pileups_list.rds")) {
+  ctcf_pileups <- map(all_ctcf_inserts,
+                      function(l) {
+                        map(l,
+                            function(ctcf_fragments) {
+                              pileup_fragments(query_gr = ctcf_fragments,
+                                               target_gr = ctcf_motifs,
+                                               target_width = 4000)
+                            })
+                      })
+  saveRDS(ctcf_pileups,
+          "Figure_1_ctcf_pileups_list.rds")
+} else {
+  ctcf_pileups <- readRDS("Figure_1_ctcf_pileups_list.rds")
+}
+```
+
+Plot CTCF pileups
+```{r}
+ctcf_pileup_dfs <- map(ctcf_pileups,
+                       function(l) {
+                         map2_dfr(l, well_labels,
+                                  function(ctcf_pileup, well_label) {
+                                    ctcf_pileup$well_label <- well_label
+                                    ctcf_pileup$well_color <- well_colors$well_color[well_colors$well_label == well_label]
+                                    ctcf_pileup
+                                  })
+                       })
+
+norm_ctcf_pileup_dfs <- map(ctcf_pileups,
+                            function(l) {
+                              pmap_dfr(list(l, well_labels, filt_meta_list),
+                                       function(ctcf_pileup, well_label, filt_meta) {
+                                         M_unique_frags <- sum(filt_meta$n_unique)/1e6
+                                         ctcf_pileup$well_label <- well_label
+                                         ctcf_pileup$well_color <- well_colors$well_color[well_colors$well_label == well_label]
+                                         
+                                         ctcf_pileup$cov <- ctcf_pileup$cov / M_unique_frags
+                                         ctcf_pileup
+                                       })
+                            })
+```
+
+```{r}
+unnormalized_ctcf_pileup_plots <- map2(ctcf_pileup_dfs, range_types,
+                                       function(ctcf_pileup_df, range_type) {
+                                         motif_rect <- data.frame(xmin = 2000 - 7, xmax = 2000 + 7,
+                                                                  ymin = 0, ymax = max(ctcf_pileup_df$cov))
+                                         ggplot() +
+                                           geom_hline(aes(yintercept=0),
+                                                      color = "black",
+                                                      size = 0.2) +
+                                           geom_rect(data = motif_rect,
+                                                     aes(xmin = xmin, xmax = xmax,
+                                                         ymin = ymin, ymax = ymax),
+                                                     fill = "gray80") +
+                                           geom_vline(aes(xintercept = c(2000 - 7, 2000 + 7)),
+                                                      color = "gray50",
+                                                      linetype = "dashed") +
+                                           geom_step(data = ctcf_pileup_df,
+                                                     aes(x = pos, y = cov,
+                                                         group = well_label,
+                                                         color = well_color),
+                                                     size = 0.5) +
+                                           scale_y_continuous("Total fragment coverage",
+                                                              expand = c(0,0)) +
+                                           scale_color_identity() +
+                                           scale_x_continuous("Pos. Relative to CTCF Motif",
+                                                              limits = c(1943, 2057),
+                                                              breaks = 1943 + cumsum(c(0,25,25,14,25,25)),
+                                                              labels = c(-50,-25,0,0,25,50),
+                                                              expand = c(0,0)) +
+                                           theme_bw(base_size = 7) +
+                                           theme(panel.grid.major = element_line(colour = "gray80",
+                                                                                 size = 0.2),
+                                                 panel.grid.minor = element_blank(),
+                                                 panel.border = element_blank(),
+                                                 axis.ticks = element_blank(),
+                                                 axis.text = element_text(colour = "black"))
+                                         #ggtitle(paste(range_type, "Unnorm."))
+                                       })
+
+normalized_ctcf_pileup_plots <- map2(norm_ctcf_pileup_dfs, range_types,
+                                     function(norm_ctcf_pileup_df, range_type) {
+                                       motif_rect <- data.frame(xmin = 2000 - 7, xmax = 2000 + 7,
+                                                                ymin = 0, ymax = max(norm_ctcf_pileup_df$cov))
+                                       
+                                       ggplot() +
+                                         geom_rect(data = motif_rect,
+                                                   aes(xmin = xmin, xmax = xmax,
+                                                       ymin = ymin, ymax = ymax),
+                                                   fill = "gray80") +
+                                         geom_vline(aes(xintercept = c(2000 - 7, 2000 + 7)),
+                                                    color = "gray50",
+                                                    linetype = "dashed") +
+                                         geom_line(data = norm_ctcf_pileup_df,
+                                                   aes(x = pos, y = cov,
+                                                       group = well_label,
+                                                       color = well_color),
+                                                   size = 1) +
+                                         ylab("Fragment overlaps per million") +
+                                         scale_color_identity() +
+                                         scale_x_continuous("Pos. Relative to CTCF Motif",
+                                                            limits = c(1943, 2057),
+                                                            breaks = 1943 + cumsum(c(0,25,25,14,25,25)),
+                                                            labels = c(-50,-25,0,0,25,50)) +
+                                         theme_bw(base_size = 7) +
+                                         theme(panel.grid.major = element_line(colour = "gray80",
+                                                                               size = 0.2),
+                                               panel.grid.minor = element_blank(),
+                                               panel.border = element_blank(),
+                                               axis.ticks = element_blank(),
+                                               axis.text = element_text(colour = "black")) +
+                                         ggtitle(paste(range_type, "Norm."))
+                                     })
+```
+
+```{r fig.width = 5, fig.height = 8}
+all_ctcf_plots <- list(unnormalized_ctcf_pileup_plots[[1]],
+                       normalized_ctcf_pileup_plots[[1]],
+                       unnormalized_ctcf_pileup_plots[[2]],
+                       normalized_ctcf_pileup_plots[[2]],
+                       unnormalized_ctcf_pileup_plots[[3]],
+                       normalized_ctcf_pileup_plots[[3]],
+                       unnormalized_ctcf_pileup_plots[[4]],
+                       normalized_ctcf_pileup_plots[[4]])
+
+ctcf_pileup_grid <- plot_grid(plotlist = all_ctcf_plots,
+                              ncol = 2)
+ctcf_pileup_grid
+```
+
+```{r}
+ggsave("Figure_1D_joint_ctcf_footprint_pileup_total.pdf",
+       unnormalized_ctcf_pileup_plots[[4]],
+       width = 2.2, height = 2)
+```
+
+
+### ex1 analysis
+
+```
+{r message=FALSE}
+if(!file.exists("Figure_1_ex1_fragment_list.rds")){
+ex1_fragment_list <- map(fragment_files,
+function(fragment_file) {
+print(paste("Reading and filtering",fragment_file))
+
+frags_df <- read_tsv(fragment_file, 
+col_names = c("seqnames","start","end","barcodes","count"))
+frags_gr <- GRanges(seqnames = frags_df$seqnames,
+IRanges(frags_df$start, frags_df$end))
+ex1_frags_gr <- filter_gr(frags_gr,
+ex1_gr,
+mode = "keep")
+ex1_frags_gr
+})
+saveRDS(ex1_fragment_list,
+"Figure_1_ex1_fragment_list.rds")
+} else {
+ex1_fragment_list <- readRDS("Figure_1_ex1_fragment_list.rds")
+}
+```
+
+Convert to footprints, boundaries, and centers, and assemble all types so we can map across them.
+
+```
+{r}
+# Footprints
+ex1_fp_list <- convert_fragment_list(ex1_fragment_list,
+to = "footprints")
+# Boundaries
+ex1_bd_list <- convert_fragment_list(ex1_fragment_list,
+to = "boundaries")
+# Cut centers
+ex1_cc_list <- convert_fragment_list(ex1_fragment_list,
+to = "cut_centers")
+
+all_ex1_inserts <- list(fragments = ex1_fragment_list,
+footprints = ex1_fp_list,
+boundaries = ex1_bd_list,
+cut_centers = ex1_cc_list)
+
+range_types <- c("Fragments",
+"Tn5 Footprints",
+"Tn5 Boundaries",
+"Tn5 Centers")
+```
+
+
+### Pileups using fragments
+
+Generate ex1 pileups
+```
+{r}
+if(!file.exists("Figure_1_ex1_pileups_list.rds")) {
+ex1_pileups <- map(all_ex1_inserts,
+function(l) {
+map(l,
+function(ex1_fragments) {
+pileup_fragments(query_gr = ex1_fragments,
+target_gr = ex1_gr,
+target_width = 4000)
+})
+})
+saveRDS(ex1_pileups,
+"Figure_1_ex1_pileups_list.rds")
+} else {
+ex1_pileups <- readRDS("Figure_1_ex1_pileups_list.rds")
+}
+```
+
+Plot ex1 pileups
+```
+{r}
+ex1_pileup_dfs <- map(ex1_pileups,
+function(l) {
+map2_dfr(l, well_labels,
+function(ex1_pileup, well_label) {
+ex1_pileup$well_label <- well_label
+ex1_pileup
+})
+})
+
+norm_ex1_pileup_dfs <- map(ex1_pileups,
+function(l) {
+pmap_dfr(list(l, well_labels, filt_meta_list),
+function(ex1_pileup, well_label, filt_meta) {
+M_unique_frags <- sum(filt_meta$n_unique)/1e6
+ex1_pileup$well_label <- well_label
+ex1_pileup$cov <- ex1_pileup$cov / M_unique_frags
+ex1_pileup
+})
+})
+```
+
+```
+{r}
+unnormalized_ex1_pileup_plots <- map2(ex1_pileup_dfs, range_types,
+function(ex1_pileup_df, range_type) {
+ggplot() +
+geom_line(data = ex1_pileup_df,
+aes(x = pos, y = cov,
+group = well_label,
+color = well_label),
+size = 1) +
+ylab("Total fragment coverage") +
+scale_color_brewer("Experiment",
+type = "qual",
+palette = 6) +
+scale_x_continuous("Pos. Relative to Ex1 3'",
+breaks = seq(0, 4000, 1000),
+labels = seq(-2000, 2000, 1000)) +
+theme_bw(base_size = 7) +
+theme(panel.grid.major = element_line(colour = "gray80",
+size = 0.2),
+panel.grid.minor = element_blank(),
+panel.border = element_blank(),
+axis.ticks = element_blank(),
+axis.text = element_text(colour = "black")) +
+ggtitle(paste(range_type, "Unnorm."))
+})
+
+normalized_ex1_pileup_plots <- map2(norm_ex1_pileup_dfs, range_types,
+function(norm_ex1_pileup_df, range_type) {
+ggplot() +
+geom_line(data = norm_ex1_pileup_df,
+aes(x = pos, y = cov,
+group = well_label,
+color = well_label),
+size = 1) +
+ylab("Fragment overlaps per million") +
+scale_color_brewer("Experiment",
+type = "qual",
+palette = 6) +
+scale_x_continuous("Pos. Relative to Ex1 3'",
+breaks = seq(0, 4000, 1000),
+labels = seq(-2000, 2000, 1000)) +
+theme_bw(base_size = 7) +
+theme(panel.grid.major = element_line(colour = "gray80",
+size = 0.2),
+panel.grid.minor = element_blank(),
+panel.border = element_blank(),
+axis.ticks = element_blank(),
+axis.text = element_text(colour = "black")) +
+ggtitle(paste(range_type, "Norm."))
+})
+```
+
+```
+{r fig.width = 7.5, fig.height = 8}
+all_ex1_plots <- list(unnormalized_ex1_pileup_plots[[1]],
+normalized_ex1_pileup_plots[[1]],
+unnormalized_ex1_pileup_plots[[2]],
+normalized_ex1_pileup_plots[[2]],
+unnormalized_ex1_pileup_plots[[3]],
+normalized_ex1_pileup_plots[[3]],
+unnormalized_ex1_pileup_plots[[4]],
+normalized_ex1_pileup_plots[[4]])
+
+ex1_pileup_grid <- plot_grid(plotlist = all_ex1_plots,
+ncol = 2)
+ex1_pileup_grid
+```
+
+
+
+
+## Summary Barplots
+
+```{r}
+read_count_summary <- map2_dfr(full_meta_list, well_labels,
+                               function(full_meta, well_label) {
+                                 data.frame(well_label = well_label,
+                                            sequenced_reads = 2e8,
+                                            reads_bc_gt1k = sum(full_meta$n_fragments),
+                                            reads_pass_qc = sum(full_meta$n_fragments[full_meta$pass_fail == "Pass"]),
+                                            unique_pass_qc = sum(full_meta$n_unique[full_meta$pass_fail == "Pass"]),
+                                            unique_pass_peaks = sum(full_meta$peaks_count[full_meta$pass_fail == "Pass"]))
+                               })
+read_count_summary
+```
+
+```{r}
+read_frac_summary <- read_count_summary
+for(i in 2:ncol(read_frac_summary)) {
+  read_frac_summary[[i]] <- read_frac_summary[[i]] / 2e8
+}
+read_frac_summary
+```
+
+```{r}
+read_frac_summary$wpos <- nrow(read_frac_summary):1
+read_frac_summary_plot_df <- reshape2::melt(read_frac_summary,
+                                            c("well_label","wpos")) %>%
+  group_by(well_label) %>%
+  mutate(vmin = lead(value, default = 0))
+```
+
+```{r}
+vlines <- data.frame(x = seq(0,1,0.25))
+read_frac_summary_plot <- ggplot() +
+  geom_rect(data = read_frac_summary_plot_df,
+            aes(xmin = vmin, xmax = value,
+                ymin = wpos - 0.4, ymax = wpos + 0.4,
+                fill = variable)) +
+  geom_vline(data = vlines, 
+             aes(xintercept = x),
+             linetype = "dashed",
+             size = 0.2,
+             color = "black") +
+  scale_fill_grey("",start = 0.9, end = 0.25) +
+  scale_x_continuous("Fraction of sequenced fragments") +
+  scale_y_continuous(breaks = read_frac_summary$wpos,
+                     labels = read_frac_summary$well_label) +
+  guides(fill=guide_legend(nrow=2,byrow=TRUE)) +
+  theme_bw(base_size = 7) +
+  theme(axis.ticks = element_blank(),
+        panel.grid = element_blank(),
+        panel.border = element_blank(),
+        legend.position = "none")
+```
+
+```{r fig.width = 3, fig.height = 1}
+read_frac_summary_plot
+```
+
+
+```{r}
+ggsave("Figure_1E_read_fraction_summary_barplot.pdf",
+       read_frac_summary_plot,
+       width = 3,
+       height = 1.5,
+       useDingbats = FALSE)
+```
+
+### 10x-style barcodes vs reads plot
+```{r message = FALSE}
+singlecell_list <- map2(singlecell_files, filt_meta_list,
+                        function(singlecell_file, meta) {
+                          sc <- read_csv(singlecell_file)
+                          sc <- sc %>%
+                            mutate(pass_fail = ifelse(barcode %in% meta$original_barcodes,
+                                                      "Pass", "Fail"))
+                          names(sc)[names(sc) == "barcode"] <- "barcode"
+                          sc
+                        })
+```
+
+```{r}
+singlecell_count_list <- map(singlecell_list,
+                             function(singlecell) {
+                               singlecell %>%
+                                 mutate(log_frags = log10(passed_filters)) %>%
+                                 mutate(log_frags = round(log_frags, 1)) %>%
+                                 group_by(pass_fail, log_frags) %>%
+                                 summarise(n_barcodes = n())
+                             })
+```
+
+```{r}
+singlecell_plot_list <- map(singlecell_count_list,
+                            function(singlecell_count) {
+                              ggplot(singlecell_count) +
+                                geom_ribbon(aes(x = log_frags,
+                                                ymax = log10(n_barcodes + 1),
+                                                ymin = 0,
+                                                group = pass_fail,
+                                                fill = pass_fail),
+                                            alpha = 0.5) +
+                                scale_fill_manual(breaks = c("Fail","Pass"),
+                                                  values = c("#BE1E2D","#27AAE1")) +
+                                scale_y_continuous(bquote(log[10]("N Barcodes")),
+                                                   expand = c(0,0)) +
+                                scale_x_continuous(bquote(log[10]("Unique Reads")),
+                                                   limits = c(1,5),
+                                                   expand = c(0,0)) +
+                                theme_bw(base_size = 7) +
+                                theme(legend.position = "none")
+                            })
+singlecell_plot_list_grid <- plot_grid(plotlist = singlecell_plot_list,
+                                       ncol = 6)
+```
+
+```{r fig.width = 7.5, fig.height = 1.5}
+singlecell_plot_list_grid
+```
+
+
+```{r}
+sessionInfo()
+```
+

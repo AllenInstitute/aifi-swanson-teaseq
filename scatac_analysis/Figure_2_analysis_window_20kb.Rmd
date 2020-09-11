@@ -1,0 +1,409 @@
+---
+title: "Figure 2 - Biological result improvement"
+author: "Lucas Graybuck"
+date: "5/29/2020"
+output: html_document
+---
+
+## Setup
+
+Load Packages
+```{r}
+quiet_library <- function(...) {
+  suppressPackageStartupMessages(library(...))
+}
+
+quiet_library(H5weaver)
+quiet_library(ATAComb)
+quiet_library(uwot)
+quiet_library(readr)
+quiet_library(dplyr)
+quiet_library(purrr)
+quiet_library(ggplot2)
+quiet_library(ggrastr)
+quiet_library(cowplot)
+options(stringsAsFactors = FALSE)
+set.seed(3030)
+```
+
+Source directories
+```{r}
+filt_meta_dir <- "../../Data/X041_downsampled_200M/filtered_metadata/"
+archr_res_dir <- "../../Data/X041_downsampled_200M/archr_results/"
+window_mat_dir <- "../../Data/X041_downsampled_200M/window_20k_h5/"
+```
+
+Selected wells:  
+X041-AP0C1W1, X041_aifi-nuclei-facs-unsorted, nuclear prep with standard 10x protocol  
+X041-AP0C1W2, X041_aifi-nuclei-facs-sort-dd, nuclear prep with 10x protocol and FACS to remove debris and dead cells  
+X041-AP0C1W3, X041_aifi-nuclei-facs-sort-neu-dd, nuclear prep with 10x protocol and FACS to remove neutrophils, debris, and dead cells  
+X041-AP0C1W4, X041_aifi-perm-facs-unsorted, perm cell prep with no FACS  
+X041-AP0C1W5, X041_aifi-perm-facs-sort-dd, perm cell prep with FACS to remove debris and dead cells
+X041-AP0C1W6, X041_aifi-perm-facs-sort-neu-dd, perm cell prep with FACS to remove neutrophils, debris, and dead cells
+```{r}
+wells_to_process <- list(nuc_no_facs = "X041_aifi-nuclei-facs-unsorted",
+                         nuc_dd_facs = "X041_aifi-nuclei-facs-sort-dd",
+                         nuc_ndd_facs = "X041_aifi-nuclei-facs-sort-neu-dd",
+                         pc_no_facs = "X041_aifi-perm-facs-unsorted",
+                         pc_dd_facs = "X041_aifi-perm-facs-sort-dd",
+                         pc_ndd_facs = "X041_aifi-perm-facs-sort-neu-dd")
+well_labels <- c("Nuclei: Unsorted",
+                 "Nuclei: No Dead/Debris",
+                 "Nuclei: No Neutrophils",
+                 "Perm: Unsorted",
+                 "Perm: No Dead/Debris",
+                 "Perm: No Neutrophils")
+```
+
+Locate files
+```{r}
+filt_meta_files <- map2(filt_meta_dir, wells_to_process, list.files, full.names = TRUE)
+archr_res_files <- map2(archr_res_dir, wells_to_process, list.files, full.names = TRUE)
+window_mat_files <- map2(window_mat_dir, wells_to_process, list.files, full.names = TRUE)
+type_anno_file <- "../common/seurat_pbmc_type_anno.tsv"
+```
+
+```{r}
+well_colors <- read.csv("../common/x041_well_colors.csv")
+```
+
+
+Display inputs
+```{r}
+print("Filtered Metadata Files:")
+print(unlist(filt_meta_files))
+```
+
+```{r}
+print("ArchR Results Files:")
+print(unlist(archr_res_files))
+```
+
+```{r}
+print("Peak Matrix Files:")
+print(unlist(window_mat_files))
+```
+
+Read metadata files
+```{r message=FALSE}
+filt_meta_list <- map(filt_meta_files, 
+                      read_csv)
+```
+
+Read ArchR results files
+```{r message=FALSE}
+archr_res_list <- map(archr_res_files, 
+                      read_csv)
+```
+
+Read peak matrices
+```{r}
+window_mats <- map(window_mat_files,
+                 read_h5_dgCMatrix)
+```
+
+### Filtering to remove doublets
+ArchR results are filtered to remove doublet cells.
+```{r message=FALSE}
+type_anno <- read_tsv(type_anno_file) %>%
+  filter(seurat_pbmc_type != "Platelets")
+
+meta_list <- map2(filt_meta_list, archr_res_list,
+                  function(filt_meta, archr_res) {
+                    left_join(archr_res, filt_meta)
+                  })
+celltypes <- unique(unlist(map(meta_list, function(meta) unique(meta$seurat_pbmc_type))))
+
+meta_list <- map(meta_list,
+                  function(meta) {
+                    left_join(meta, type_anno)
+                  })
+```
+
+Filter peak data too
+```{r}
+window_mats <- map2(window_mats, meta_list,
+                  function(window_mat, meta) {
+                    window_mat[,meta$barcodes]
+                  })
+```
+
+
+### Dimension reduction
+```{r}
+peak_lsi <- map(window_mats,
+                atac_lsi)
+peak_pcs <- map(peak_lsi,
+                function(lsi) {
+                  lsi$pcs[,2:30]
+                })
+```
+
+```{r}
+peak_umaps <- map(peak_pcs,
+                 umap,
+                 scale = TRUE,
+                 min_dist = 0.2)
+peak_umap_dfs <- map2(meta_list, peak_umaps,
+                      function(filt_meta, peak_umap) {
+                        peak_umap <- as.data.frame(peak_umap)
+                        names(peak_umap) <- c("umap_1","umap_2")
+                        cbind(filt_meta, peak_umap)
+                      })
+```
+
+```{r}
+peak_plots_umap_log_unique <- map2(peak_umap_dfs, well_labels,
+                       function(peak_umap_df, well_label) {
+                         ggplot(peak_umap_df) +
+                           geom_point_rast(aes(x = umap_1,
+                                               y = umap_2,
+                                               color = peaks_frac)) +
+                           scale_color_viridis_c("FRIP",
+                                                 limits = c(0,1),
+                                                 option = "magma") +
+                           theme_bw(base_size = 7) +
+                           theme(legend.position = "bottom",
+                                 axis.text = element_text(color = "black"),
+                                 axis.ticks = element_blank(),
+                                 panel.grid.minor = element_blank(),
+                                 panel.border = element_blank()) +
+                           guides(color = guide_colourbar(title.position = "top",
+                                                          barheight = unit(0.1, "in"))) +
+                           ggtitle(well_label)
+                       })
+```
+
+
+```{r fig.width = 7.5, fig.height = 2}
+peak_plots_umap_frip_grid <- plot_grid(plotlist = peak_plots_umap_log_unique,
+                                 ncol = 6)
+peak_plots_umap_frip_grid
+```
+
+```{r}
+ggsave("Figure_2A_umaps_frip.pdf",
+       peak_plots_umap_frip_grid,
+       width = 7.5, height = 2,
+       useDingbats = FALSE)
+```
+
+```{r}
+peak_plots_umap_celltype <- map2(peak_umap_dfs, well_labels,
+                       function(peak_umap_df, well_label) {
+                         ggplot(peak_umap_df) +
+                           geom_point_rast(aes(x = umap_1,
+                                               y = umap_2,
+                                               color = seurat_pbmc_type_color)) +
+                           theme_bw(base_size = 7) +
+                           scale_color_identity() +
+                           theme(legend.position = "bottom",
+                                 axis.text = element_text(color = "black"),
+                                 axis.ticks = element_blank(),
+                                 panel.grid.minor = element_blank(),
+                                 panel.border = element_blank()) +
+                           ggtitle(well_label)
+                       })
+```
+
+```{r}
+peak_plots_umap_celltype_grid <- plot_grid(plotlist = peak_plots_umap_celltype,
+                                 ncol = 6)
+```
+
+```{r fig.width = 7.5, fig.height = 1.6}
+peak_plots_umap_celltype_grid
+```
+
+```{r fig.width = 1.5, fig.height = 1.75}
+peak_plots_umap_celltype_legend <- ggplot(type_anno) +
+  geom_tile(aes(x = 1,
+                y = nrow(type_anno):1,
+                fill = seurat_pbmc_type_color)) +
+  geom_text(aes(x = 1.6,
+                y = nrow(type_anno):1,
+                label = seurat_pbmc_type),
+            hjust = 0,
+            size = 3) +
+  scale_fill_identity() +
+  xlim(0,8)+
+  theme_void()
+peak_plots_umap_celltype_legend
+```
+
+```{r}
+ggsave("Figure_2A_umaps_celltype.pdf",
+       peak_plots_umap_celltype_grid,
+       width = 7.5, height = 1.6,
+       useDingbats = FALSE)
+ggsave("Figure_2A_umaps_celltype_legend.pdf",
+       peak_plots_umap_celltype_legend,
+       width = 1.5, height = 1.75,
+       useDingbats = FALSE)
+```
+
+### Type fraction barplot
+```{r}
+flow_count_summary <- read.csv("../common/2020-07-21_IBD3_FACS_gating_counts.csv")
+flow_count_summary <- flow_count_summary %>%
+  dplyr::rename(n_cells = count,
+                value = frac) %>%
+  left_join(type_anno) %>%
+  arrange(seurat_pbmc_type_id) %>%
+  mutate(well_label = "Flow Cytometry",
+         wpos = 7,
+         vmax = cumsum(value),
+         vmin = lag(vmax, default = 0))
+```
+
+
+```{r}
+celltype_count_summary <- map2_dfr(meta_list, well_labels,
+                         function(meta, well_label) {
+                           count_list <- map(celltypes,
+                                             function(celltype) {
+                                               sum(meta$seurat_pbmc_type == celltype) 
+                                             })
+                           names(count_list) <- celltypes
+                           cbind(data.frame(well_label = well_label,
+                                            n_cells = nrow(meta)),
+                                 as.data.frame(count_list))
+                         })
+celltype_count_summary
+```
+
+```{r}
+celltype_frac_summary <- celltype_count_summary
+for(i in 3:ncol(celltype_frac_summary)) {
+  celltype_frac_summary[[i]] <- celltype_frac_summary[[i]] / celltype_frac_summary$n_cells
+}
+celltype_frac_summary
+```
+
+```{r}
+celltype_frac_summary$wpos <- nrow(celltype_frac_summary):1
+celltype_frac_summary_plot_df <- reshape2::melt(celltype_frac_summary,
+                                  c("well_label","wpos","n_cells")) %>%
+  rename(seurat_pbmc_type = variable) %>%
+  left_join(type_anno) %>%
+  arrange(well_label, seurat_pbmc_type_id) %>%
+  group_by(well_label) %>%
+  mutate(vmax = cumsum(value),
+         vmin = lag(vmax, default = 0))
+
+flow_count_summary <- flow_count_summary %>%
+  select(names(celltype_frac_summary_plot_df))
+
+celltype_frac_summary_plot_df <- rbind(celltype_frac_summary_plot_df, flow_count_summary)
+```
+
+RMSD calculations
+```{r}
+celltype_frac_mat <- as.matrix(celltype_frac_summary[,3:(ncol(celltype_frac_summary)-1)])
+rownames(celltype_frac_mat) <- celltype_frac_summary$well_label
+
+# Add zeroes for any cell type not detected in any of our conditions (e.g. T.CD8.Naive)
+missing_types <- setdiff(flow_count_summary$seurat_pbmc_type, colnames(celltype_frac_mat))
+
+missing_mat <- matrix(rep(0, length(missing_types) * nrow(celltype_frac_mat)),
+                      ncol = length(missing_types))
+colnames(missing_mat) <- missing_types
+celltype_frac_mat <- cbind(celltype_frac_mat, missing_mat)
+celltype_frac_mat <- celltype_frac_mat[,flow_count_summary$seurat_pbmc_type]
+
+flow_frac_vec <- flow_count_summary$value
+
+rmsd_values <- apply(celltype_frac_mat,
+                     1,
+                     function(atac_frac_vec) {
+                       d <- flow_frac_vec - atac_frac_vec
+                       sq_d <- d ^ 2
+                       m_sq_d <- mean(sq_d)
+                       round(sqrt(m_sq_d), 3)
+                     })
+rmsd_values
+```
+
+
+```{r}
+y_labels <- celltype_frac_summary_plot_df %>%
+  select(well_label, wpos) %>%
+  unique()
+
+vlines <- data.frame(x = seq(0,1,0.25))
+celltype_frac_summary_plot <- ggplot() +
+  geom_rect(data = celltype_frac_summary_plot_df,
+            aes(xmin = vmin, xmax = vmax,
+                ymin = wpos - 0.4, ymax = wpos + 0.4,
+                fill = seurat_pbmc_type_color)) +
+  geom_vline(data = vlines, 
+             aes(xintercept = x),
+             linetype = "dashed",
+             size = 0.2,
+             color = "black") +
+  scale_fill_identity() +
+  scale_x_continuous("Fraction of labeled cells") +
+  scale_y_continuous(breaks = y_labels$wpos,
+                     labels = y_labels$well_label) +
+  guides(fill=guide_legend(nrow=2,byrow=TRUE)) +
+  theme_bw(base_size = 7) +
+  theme(axis.ticks = element_blank(),
+        panel.grid = element_blank(),
+        panel.border = element_blank(),
+        legend.position = "none")
+```
+
+```{r fig.width = 4, fig.height = 1.5}
+celltype_frac_summary_plot
+```
+
+```{r}
+ggsave("Figure_2B_celltype_fraction_barplot.pdf",
+       celltype_frac_summary_plot,
+       width = 4, height = 1.5,
+       useDingbats = FALSE)
+```
+
+
+### Type transfer score distributions
+
+Score dropoff coordinates
+```{r}
+score_drop_df <- map2_dfr(meta_list, well_labels,
+                          function(meta, well_label) {
+                            meta %>%
+                              mutate(well_label = well_label) %>%
+                              arrange(desc(seurat_pbmc_type_score)) %>%
+                              mutate(rank = 1:n()) %>%
+                              select(well_label, seurat_pbmc_type_score, rank) %>%
+                              mutate(frac = rank / n())
+                          })
+```
+
+Score dropoff plot
+```{r fig.width = 3, fig.height = 1.5}
+
+score_drop_plot <- ggplot(score_drop_df) +
+  geom_line(aes(x = rank,
+                y = seurat_pbmc_type_score,
+                group = well_label,
+                color = well_label),
+            size = 0.5) +
+  scale_x_continuous("Cells ranked by score") +
+  scale_y_continuous("Seurat label transfer score") +
+  scale_color_manual("",
+                       breaks = well_colors$well_label,
+                       values = well_colors$well_color) +
+  theme_bw(base_size = 7)
+score_drop_plot
+```
+```{r}
+ggsave("Figure_2C_labeling_score_drop_plot.pdf",
+       score_drop_plot,
+       width = 3, height = 1.5,
+       useDingbats = FALSE)
+```
+
+```{r}
+sessionInfo()
+```

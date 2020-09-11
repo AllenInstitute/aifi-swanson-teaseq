@@ -1,0 +1,289 @@
+---
+title: "Supplementary Figure 1 analysis"
+author: "Lucas Graybuck"
+date: "8/27/2020"
+output: html_document
+---
+
+## Setup
+
+Load Packages
+```{r}
+quiet_library <- function(...) {
+  suppressPackageStartupMessages(library(...))
+}
+
+quiet_library(data.table)
+quiet_library(readr)
+quiet_library(dplyr)
+quiet_library(purrr)
+quiet_library(ggplot2)
+quiet_library(ggrastr)
+quiet_library(cowplot)
+quiet_library(patchwork)
+quiet_library(GenomicRanges)
+options(stringsAsFactors = FALSE)
+source("../common/granges_helpers.R")
+```
+
+Source directories
+```{r}
+full_meta_dir <- "../../Data/downsampled_125M/all_metadata/"
+filt_meta_dir <- "../../Data/downsampled_125M/filtered_metadata/"
+fragments_dir <- "../../Data/downsampled_125M/filtered_fragments/"
+failed_fragments_dir <- "../../Data/downsampled_125M/failed_fragments/"
+singlecell_dir <- "../../Data/downsampled_125M/singlecell/"
+```
+
+Selected wells:  
+
+Nuclear Lysis protocols:
+X024-AP0C1W1, Ficoll, Nuclei, 1x 10xNIB
+X024-AP0C1W2, Ficoll, Nuclei, 0.25x 10xNIB
+X024-AP0C1W3, Ficoll, Nuclei, 0.1x 10xNIB
+X024-AP0C1W4, Ficoll, Nuclei, 1x ANIB
+
+Permeabilization protocols:
+X025-AP0C1W1, Ficoll, Perm Cells, 0.01% Digitonin
+X025-AP0C1W2, Ficoll, Perm Cells, 0.05% Digitonin
+X025-AP0C1W3, Ficoll, Perm Cells, 0.1% Digitonin
+X025-AP0C1W4, Ficoll, Perm Cells, 0.2% Digitonin
+
+Additional Washes:
+X018-AP0C1W1, Lueka, Perm Cells, 0.01% Digitonin, Standard
+X018-AP0C1W3, Lueka, Perm Cells, 0.01% Digitonin, 3 Washes Pre-perm
+X018-AP0C1W4, Lueka, Perm Cells, 0.01% Digitonin, 3 Washes Pre-perm, 1 Wash Post-perm
+
+Ficoll FACS vs Leukapheresis FACS:
+X027-AP0C1W1, Ficoll, Perm Cells, No FACS
+X027-AP0C1W3, Ficoll, Perm Cells, Neutrophil Depletion
+B003-AP0C1W7, Lueka, Perm Cells, No FACS
+B003-AP0C1W8, Leuka, Perm Cells, Neutrophil Depletion
+
+Magnetic Bead purification:
+X032-AP0C1W3, Ficoll, Perm Cells, No Beads
+X032-AP0C1W4, Ficoll, Perm Cells, CD15 Depletion
+X032-AP0C1W1, Leuka, Perm Cells, No Beads
+X032-AP0C1W2, Leuka, Perm Cells, CD15 Depletion
+
+```{r}
+wells_to_process <- list("X024-AP0C1W1",
+                         "X024-AP0C1W2",
+                         "X024-AP0C1W3",
+                         "X024-AP0C1W4",
+                         "X025-AP0C1W1",
+                         "X025-AP0C1W2",
+                         "X025-AP0C1W3",
+                         "X025-AP0C1W4",
+                         # "X018-AP0C1W1",
+                         # "X018-AP0C1W3",
+                         # "X018-AP0C1W4",
+                         "X027-AP0C1W1",
+                         "X027-AP0C1W3",
+                         "B003-AP0C1W7",
+                         "B003-AP0C1W8",
+                         "X032-AP0C1W3",
+                         "X032-AP0C1W4",
+                         "X032-AP0C1W1",
+                         "X032-AP0C1W2")
+well_labels <- c("Ficoll, Nuclei, 1x 10xNIB",
+                 "Ficoll, Nuclei, 0.25x 10xNIB",
+                 "Ficoll, Nuclei, 0.1x 10xNIB",
+                 "Ficoll, Nuclei, 1x ANIB",
+                 "Ficoll, Perm Cells, 0.01% Digitonin",
+                 "Ficoll, Perm Cells, 0.05% Digitonin",
+                 "Ficoll, Perm Cells, 0.1% Digitonin",
+                 "Ficoll, Perm Cells, 0.2% Digitonin",
+                 # "Lueka, Perm Cells, 0.01% Digitonin, Standard",
+                 # "Lueka, Perm Cells, 0.01% Digitonin, 3 Washes Pre-perm",
+                 # "Lueka, Perm Cells, 0.01% Digitonin, 3 Washes Pre-perm, 1 Wash Post-perm",
+                 "Ficoll, Perm Cells, No FACS",
+                 "Ficoll, Perm Cells, Neutrophil Depletion",
+                 "Lueka, Perm Cells, No FACS",
+                 "Leuka, Perm Cells, Neutrophil Depletion",
+                 "Ficoll, Perm Cells, No Beads",
+                 "Ficoll, Perm Cells, CD15 Depletion",
+                 "Leuka, Perm Cells, No Beads",
+                 "Leuka, Perm Cells, CD15 Depletion")
+```
+
+Locate files
+```{r}
+full_meta_files <- map2(full_meta_dir, wells_to_process, list.files, full.names = TRUE)
+filt_meta_files <- map2(filt_meta_dir, wells_to_process, list.files, full.names = TRUE)
+singlecell_files <- map2(singlecell_dir, wells_to_process, list.files, full.names = TRUE)
+```
+
+Display inputs
+```{r}
+print("Full Metadata Files:")
+print(unlist(full_meta_files))
+```
+
+```{r}
+print("Filtered Metadata Files:")
+print(unlist(filt_meta_files))
+```
+
+```{r}
+print("10x singlecell.csv Files:")
+print(unlist(singlecell_files))
+```
+
+
+Read metadata files
+```{r message=FALSE}
+full_meta_list <- map(full_meta_files, read_csv)
+filt_meta_list <- map(filt_meta_files, read_csv)
+```
+
+
+## Reads vs FRIP plots
+
+Flag full metadata cells that pass or fail filtering
+```{r}
+full_meta_list <- map2(full_meta_list, filt_meta_list,
+                       function(full, filt) {
+                         full %>%
+                           mutate(pass_fail = ifelse(barcodes %in% filt$barcodes,
+                                                     "Pass", "Fail"))
+                       })
+```
+
+Generate depth vs FRIP plots
+```{r}
+reads_vs_frip_plotlist <- map2(full_meta_list, well_labels,
+                               function(meta, label) {
+                                 ggplot(meta) +
+                                   geom_point_rast(aes(x = n_unique,
+                                                       y = peaks_frac,
+                                                       color = pass_fail),
+                                                   size = 0.5,
+                                                   raster.dpi = 150) +
+                                   scale_color_manual(breaks = c("Fail","Pass"),
+                                                      values = c("#404040","skyblue")) +
+                                   scale_x_log10(limits = c(8e2, 2e5),
+                                                 breaks = c(1e3, 1e4, 1e5),
+                                                 labels = c("1k", "10k", "100k"),
+                                                 expand = c(0,0)) +
+                                   xlab(bquote(log[10]("Unique Reads"))) +
+                                   scale_y_continuous("",
+                                                      limits = c(0, 1),
+                                                      expand = c(0,0)) +
+                                   theme_bw(base_size = 6) +
+                                   theme(legend.position = "none",
+                                         panel.grid.major = element_line(colour = "gray80",
+                                                                         size = 0.2),
+                                         panel.grid.minor = element_blank(),
+                                         panel.border = element_blank(),
+                                         axis.ticks = element_blank(),
+                                         axis.text = element_text(colour = "black")) +
+                                   ggtitle(label)
+                               })
+```
+
+Preview depth vs FRIP plots
+```{r fig.width = 6, fig.height = 7.25}
+reads_vs_frip_plot_grid <- plot_grid(plotlist = reads_vs_frip_plotlist,
+                                     ncol = 4)
+reads_vs_frip_plot_grid
+```
+
+Save plots
+```{r}
+ggsave("Supp_Fig_1_reads_vs_frip_plot.pdf",
+       width = 6, height = 7.25,
+       useDingbats = FALSE)
+```
+
+
+## Fragment size distributions
+
+Fragments in barcodes that pass QC
+```{r message=FALSE}
+passed_fragment_length_distributions <- map(fragment_files,
+                                            function(fragment_file) {
+                                              print(paste("Tabulating widths for",fragment_file))
+                                              
+                                              frags_df <- read_tsv(fragment_file, 
+                                                                   col_names = c("seqnames","start","end","barcodes","count"))
+                                              frags_df$width <- frags_df$end - frags_df$start
+                                              frag_width_table <- frags_df %>%
+                                                group_by(width) %>%
+                                                summarise(count = n()) %>%
+                                                ungroup()
+                                              frag_width_table$frac <- frag_width_table$count / sum(frag_width_table$count)
+                                              frag_width_table
+                                            })
+```
+
+Fragments in barcodes that fail QC
+```{r message=FALSE}
+failed_fragment_length_distributions <- map(failed_fragment_files,
+                                            function(fragment_file) {
+                                              print(paste("Tabulating widths for",fragment_file))
+                                              
+                                              frags_df <- read_tsv(fragment_file, 
+                                                                   col_names = c("seqnames","start","end","barcodes","count"))
+                                              frags_df$width <- frags_df$end - frags_df$start
+                                              frag_width_table <- frags_df %>%
+                                                group_by(width) %>%
+                                                summarise(count = n()) %>%
+                                                ungroup()
+                                              frag_width_table$frac <- frag_width_table$count / sum(frag_width_table$count)
+                                              frag_width_table
+                                            })
+```
+Build Plots
+```{r}
+frag_length_plots <- pmap(list(passed_fragment_length_distributions,
+                               failed_fragment_length_distributions,
+                               well_labels),
+                          function(passed_fragment_length_distribution,
+                                   failed_fragment_length_distributions,
+                                   well_label) {
+                            well_color <- well_colors$well_color[well_colors$well_label == well_label]
+                            
+                            passed_fragment_length_distribution$pass_fail <- "Pass"
+                            failed_fragment_length_distributions$pass_fail <- "Fail"
+                            dist_df <- rbind(passed_fragment_length_distribution,
+                                             failed_fragment_length_distributions)
+                            ggplot(dist_df) +
+                              geom_line(aes(x = width,
+                                            y = frac,
+                                            color = pass_fail)) +
+                              scale_color_manual(breaks = c("Fail","Pass"),
+                                                 values = c("#404040",well_color)) +
+                              scale_x_continuous("Fragment length",
+                                                 limits = c(0,500)) +
+                              scale_y_continuous("Frac. reads") +
+                              theme_bw(base_size = 7) +
+                              theme(legend.position = "none",
+                                    panel.grid.major = element_line(colour = "gray80",
+                                                                    size = 0.2),
+                                    panel.grid.minor = element_blank(),
+                                    panel.border = element_blank(),
+                                    axis.ticks = element_blank(),
+                                    axis.text = element_text(colour = "black"))
+                          })
+```
+
+```{r}
+fragment_length_plot_grid <- plot_grid(plotlist = frag_length_plots, ncol = 6)
+```
+
+```{r fig.width = 7.5, fig.height = 0.8}
+fragment_length_plot_grid
+```
+
+```{r}
+ggsave("Figure_1B_fragment_length_plot.pdf",
+       width = 7.5, height = 0.8,
+       useDingbats = FALSE)
+```
+
+
+```{r}
+sessionInfo()
+```
+

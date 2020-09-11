@@ -1,0 +1,196 @@
+---
+title: "QC Stats summary assembly"
+author: "Lucas Graybuck"
+date: "7/27/2020"
+output: html_document
+---
+
+## Setup
+
+Load Packages
+```{r}
+quiet_library <- function(...) {
+  suppressPackageStartupMessages(library(...))
+}
+
+quiet_library(H5weaver)
+quiet_library(readr)
+quiet_library(dplyr)
+quiet_library(purrr)
+quiet_library(ggplot2)
+```
+
+Source directories
+```{r}
+full_meta_dir <- "../../Data/X041_downsampled_200M/all_metadata/"
+filt_meta_dir <- "../../Data/X041_downsampled_200M/filtered_metadata/"
+singlecell_dir <- "../../Data/X041_downsampled_200M/singlecell/"
+
+peaks_mat_dir <- "../../Data/X041_downsampled_200M/peaks_h5/"
+tss_mat_dir <- "../../Data/X041_downsampled_200M/tss_h5/"
+```
+
+Selected wells:  
+X041-AP0C1W1, X041_aifi-nuclei-facs-unsorted, nuclear prep with standard 10x protocol  
+X041-AP0C1W2, X041_aifi-nuclei-facs-sort-dd, nuclear prep with 10x protocol and FACS to remove debris and dead cells  
+X041-AP0C1W3, X041_aifi-nuclei-facs-sort-neu-dd, nuclear prep with 10x protocol and FACS to remove neutrophils, debris, and dead cells  
+X041-AP0C1W4, X041_aifi-perm-facs-unsorted, perm cell prep with no FACS  
+X041-AP0C1W5, X041_aifi-perm-facs-sort-dd, perm cell prep with FACS to remove debris and dead cells
+X041-AP0C1W6, X041_aifi-perm-facs-sort-neu-dd, perm cell prep with FACS to remove neutrophils, debris, and dead cells
+```{r}
+wells_to_process <- list(nuc_no_facs = "X041_aifi-nuclei-facs-unsorted",
+                         nuc_dd_facs = "X041_aifi-nuclei-facs-sort-dd",
+                         nuc_ndd_facs = "X041_aifi-nuclei-facs-sort-neu-dd",
+                         pc_no_facs = "X041_aifi-perm-facs-unsorted",
+                         pc_dd_facs = "X041_aifi-perm-facs-sort-dd",
+                         pc_ndd_facs = "X041_aifi-perm-facs-sort-neu-dd")
+well_labels <- c("Nuclei: Unsorted",
+                 "Nuclei: No Dead/Debris",
+                 "Nuclei: No Neutrophils",
+                 "Perm: Unsorted",
+                 "Perm: No Dead/Debris",
+                 "Perm: No Neutrophils")
+well_colors <- read.csv("../common/x041_well_colors.csv")
+```
+
+
+Locate files
+```{r}
+full_meta_files <- map2(full_meta_dir, wells_to_process, list.files, full.names = TRUE)
+filt_meta_files <- map2(filt_meta_dir, wells_to_process, list.files, full.names = TRUE)
+singlecell_files <- map2(singlecell_dir, wells_to_process, list.files, full.names = TRUE)
+peaks_mat_files <- map2(peaks_mat_dir, wells_to_process, list.files, full.names = TRUE)
+tss_mat_files <- map2(tss_mat_dir, wells_to_process, list.files, full.names = TRUE)
+```
+
+Display inputs
+```{r}
+print("Full Metadata Files:")
+print(unlist(full_meta_files))
+```
+
+```{r}
+print("Filtered Metadata Files:")
+print(unlist(filt_meta_files))
+```
+
+```{r}
+print("10x singlecell.csv Files:")
+print(unlist(singlecell_files))
+```
+
+```{r}
+print("Peak H5 Matrix Files:")
+print(unlist(peaks_mat_files))
+```
+
+```{r}
+print("TSS H5 Matrix Files:")
+print(unlist(tss_mat_files))
+```
+
+Read metadata files
+```{r message=FALSE}
+full_meta_list <- map(full_meta_files, read_csv)
+filt_meta_list <- map(filt_meta_files, read_csv)
+singlecell_list <- map(singlecell_files, read_csv)
+```
+
+```{r}
+filt_meta <- do.call(rbind, filt_meta_list) %>%
+  mutate(frac_mito = n_mito / n_fragments) %>%
+  mutate(frac_tss = tss_count / n_unique) %>%
+  mutate(frac_peaks = peaks_count / n_unique)
+```
+
+Count Features for each dataset
+```{r}
+peak_counts <- map_dfr(peaks_mat_files,
+                   function(peak_mat_file) {
+                     print(paste("Processing", peak_mat_file))
+                     peak_mat <- read_h5_dgCMatrix(peak_mat_file)
+                     n_peak_hits <- colSums(peak_mat > 0)
+                     data.frame(barcodes = colnames(peak_mat),
+                                n_peak_hits = n_peak_hits,
+                                frac_peak_hits = n_peak_hits / nrow(peak_mat))
+                   })
+tss_counts <- map_dfr(tss_mat_files,
+                   function(tss_mat_file) {
+                     print(paste("Processing", tss_mat_file))
+                     tss_mat <- read_h5_dgCMatrix(tss_mat_file)
+                     n_tss_hits <- colSums(tss_mat > 0)
+                     data.frame(barcodes = colnames(tss_mat),
+                                n_tss_hits = n_tss_hits,
+                                frac_tss_hits = n_tss_hits / nrow(tss_mat))
+                   })
+```
+
+
+```{r}
+well_summary <- filt_meta %>%
+  left_join(peak_counts) %>%
+  left_join(tss_counts) %>%
+  group_by(pbmc_sample_id) %>%
+  summarise(n_cells = n(),
+            med_n_fragments = median(n_fragments),
+            med_n_mito = median(n_mito),
+            med_frac_mito = median(n_mito / n_fragments),
+            med_n_unique = median(n_unique),
+            med_frac_unique = median(n_unique / n_fragments),
+            med_n_tss_frag = median(tss_count),
+            med_frac_tss_frag = median(tss_count / n_unique),
+            med_n_tss_hits = median(n_tss_hits),
+            med_frac_tss_hits = median(frac_tss_hits),
+            med_n_peaks_frag = median(peaks_count),
+            med_frac_peaks_frag = median(peaks_count / n_unique),
+            med_n_peaks_hits = median(n_peak_hits),
+            med_frac_peaks_hits = median(frac_peak_hits)) %>%
+  mutate_at(vars(starts_with("med_frac")), round, digits = 3)
+
+well_summary
+```
+```{r}
+write.csv(well_summary,
+          "X041_well_qc_stats.csv",
+          row.names = FALSE)
+```
+
+
+Distribution plots for supplement:
+```{r}
+qc_violin_plot(filt_meta,
+               category_x = "pbmc_sample_id",
+               name_x = "Sample",
+               column_y = "frac_mito",
+               name_y = "Mito. Fraction",
+               log_y = FALSE)
+```
+
+Distribution plots for supplement:
+```{r}
+qc_violin_plot(filt_meta,
+               category_x = "pbmc_sample_id",
+               name_x = "Sample",
+               column_y = "n_unique",
+               name_y = "N Unique Reads",
+               log_y = TRUE)
+```
+
+```{r}
+qc_violin_plot(filt_meta,
+               category_x = "pbmc_sample_id",
+               name_x = "Sample",
+               column_y = "frac_tss",
+               name_y = "FRITSS",
+               log_y = FALSE)
+```
+
+```{r}
+qc_violin_plot(filt_meta,
+               category_x = "pbmc_sample_id",
+               name_x = "Sample",
+               column_y = "frac_peaks",
+               name_y = "FRIP",
+               log_y = FALSE)
+```
+
