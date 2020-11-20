@@ -1,0 +1,14 @@
+seurat_pbmc_type	seurat_pbmc_type_id	seurat_pbmc_type_color
+DC.Plasmacytoid	1	#FF7D91
+B.Naive	2	#F26439
+B.Activated	3	#992E46
+T.CD4.Naive	4	#81D08B
+T.CD4.Memory	5	#009444
+T.CD8.Naive	6	#76ACD7
+T.CD8.Effector	7	#1B75BC
+T.DoubleNegative	8	#00D37D
+NK	9	#8DC63F
+DC.Myeloid	10	#9246FF
+Mono.CD14	11	#B973FF
+Mono.CD16	12	#E680FF
+Platelets	13	#6B1799
