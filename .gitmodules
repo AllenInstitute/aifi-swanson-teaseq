@@ -1,0 +1,3 @@
+[submodule "Barcounter-release"]
+	path = Barcounter-release
+	url = https://github.com/AllenInstitute/Barcounter-release
