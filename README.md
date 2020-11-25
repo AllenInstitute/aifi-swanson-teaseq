@@ -1,2 +1,5 @@
-# aifi-swanson-icicleseq
-Code related to Swanson, et. al. for scATAC-seq and ICICLE-seq data processing, analysis and visualization
+# aifi-swanson-teaseq
+
+Code related to Swanson, et. al. for TEA-seq, ICICLE-seq, and scATAC-seq data processing, analysis and visualization.
+
+
