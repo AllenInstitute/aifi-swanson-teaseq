@@ -3,7 +3,7 @@
 #### Code related to Swanson, *et. al*. for scATAC-seq, ICICLE-seq,   
 #### and TEA-seq data processing, analysis and visualization.  
 
-<img src="https://github.com/AllenInstitute/aifi-swanson-teaseq/raw/master/common/2020-11-20_TEA-seq_overview.png" alt="TEA-seq overview"/ width=400>
+![TEA-seq overview](common/2020-11-20_TEA-seq_overview.png =350x)
 
 <a name="con"></a>
 
