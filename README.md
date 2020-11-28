@@ -1,14 +1,17 @@
-# aifi-swanson-teaseq
+## aifi-swanson-teaseq
 
-Code related to Swanson, et. al. for TEA-seq, ICICLE-seq, and scATAC-seq data processing, analysis and visualization.  
+#### Code related to Swanson, *et. al*. for scATAC-seq, ICICLE-seq,   
+#### and TEA-seq data processing, analysis and visualization.  
 
-Preprocessing and analysis scripts were generated and run on Linux/Unix-like platforms (Debian/Ubuntu) with R >= v3.6.3 and 4.0.2 .  
+<img src="common/2020-11-20_TEA-seq_overview.png" alt="TEA-seq overview"/ width=400>
 
 <a name="con"></a>
 
 ### Contents
 
 #### [Manuscript/Citation](#man)  
+
+#### [Protocols](#pro)  
 
 #### [GEO Repository](#geo)  
 
@@ -60,6 +63,16 @@ Elliott Swanson, Cara Lord, Julian Reading, Alexander T. Heubeck, Adam K. Savage
 
 ------------
 
+<a name="pro"></a>
+
+### Protocols
+
+A detailed bench protocol for TEA-seq written by Elliott Swanson is [available on protocols.io](https://www.protocols.io/edit/tea-seq-bpp2mmqe).
+
+[Return to Contents](#con)
+
+------------
+
 <a name="geo"></a>
 
 ### GEO Repository
@@ -76,6 +89,9 @@ Data from Swanson, *et al.* will be available on GEO at [Series  GSE158013](http
 
 **Genome Builds**  
 All samples used in Swanson, *et al.* were from human donors. We use *GRCHg38/hg38* genome builds throughout our processing and analysis.
+
+**Computing Environment**
+Preprocessing and analysis scripts were generated and run on Linux/Unix-like platforms (Debian/Ubuntu) with R >= v3.6.3 and 4.0.2 .  
 
 [Return to Contents](#con)
 
