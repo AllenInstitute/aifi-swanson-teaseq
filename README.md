@@ -16,6 +16,9 @@
 #### [GEO Repository](#geo)  
 
 #### [General Notes](#gen)  
+- [Genome Builds](#gen-gen)  
+- [Computing Environment](#gen-com)  
+- [Reference Region Sets](#gen-ref)
 
 #### [scATAC-seq](#sca)  
 - [Requirements/Inputs](#sca-req)  
@@ -87,14 +90,26 @@ Data from Swanson, *et al.* will be available on GEO at [Series  GSE158013](http
 
 ### General Notes
 
+<a name="gen-gen"></a>
+
 **Genome Builds**  
 All samples used in Swanson, *et al.* were from human donors. We use *GRCHg38/hg38* genome builds throughout our processing and analysis.
+
+<a name="gen-com"></a>
 
 **Computing Environment**
 Preprocessing and analysis scripts were generated and run on Linux/Unix-like platforms (Debian/Ubuntu) with R >= v3.6.3 and 4.0.2 .  
 
+<a name="gen-ref"></a>
+
 **Reference Region Sets**  
-For ATAC-seq data analysis, we made use of several reference hg38 region sets from multiple sources. Retrieval and assembly of these regions for use in downstream analysis are available in the R script `reference/get_reference_datasets.R`.
+For ATAC-seq data analysis, we made use of several reference hg38 region sets from multiple sources. Retrieval and assembly of these regions for use in downstream analysis are available in the R script [`reference/get_reference_datasets.R`](https://github.com/AllenInstitute/aifi-swanson-teaseq/blob/master/reference/get_reference_datasets.R).  
+
+The references used for analysis are:  
+1. ENSEMBLv93 Gene bodies, filtered for genes used in 10x Genomics reference [`refdata-cellranger-GRCh38-3.0.0`](https://support.10xgenomics.com/single-cell-gene-expression/software/release-notes/build#grch38_3.0.0).  
+2. ENSEMBLv93 TSS regions (TSS +/- 2kb) filtered as for **1.**  
+3. scATAC-seq PBMC peaks from [Lareau, *et al.*](https://pubmed.ncbi.nlm.nih.gov/31235917/) at GEO Accession [GSE123577](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE123577).  
+4. ENCODE/Altius DNase-seq Index regions from [Mouleman, *et al.*](https://www.nature.com/articles/s41586-020-2559-3) at ENCODE File ID [ENCFF503GCK](https://www.encodeproject.org/files/ENCFF503GCK/).  
 
 [Return to Contents](#con)
 
