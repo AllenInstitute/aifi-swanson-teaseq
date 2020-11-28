@@ -3,7 +3,7 @@
 #### Code related to Swanson, *et. al*. for scATAC-seq, ICICLE-seq,   
 #### and TEA-seq data processing, analysis and visualization.  
 
-![TEA-seq overview](common/2020-11-20_TEA-seq_overview.png =350x)
+![TEA-seq overview](common/2020-11-20_TEA-seq_overview.png)
 
 <a name="con"></a>
 
