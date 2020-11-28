@@ -11,7 +11,7 @@ names(ctcf_motifs) <- c("seqnames","start","end",
                         "best_model","num_models")
 
 
-altius_gr <- readRDS(system.file("reference/hg38_altius_gr.rds", package = "ATAComb"))
+altius_gr <- readRDS(system.file("../reference/hg38_altius_gr.rds", package = "ATAComb"))
 
 ctcf_gr <- GRanges(seqnames = ctcf_motifs$seqnames,
                    IRanges(start = ctcf_motifs$start,

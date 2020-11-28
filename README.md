@@ -93,6 +93,9 @@ All samples used in Swanson, *et al.* were from human donors. We use *GRCHg38/hg
 **Computing Environment**
 Preprocessing and analysis scripts were generated and run on Linux/Unix-like platforms (Debian/Ubuntu) with R >= v3.6.3 and 4.0.2 .  
 
+**Reference Region Sets**  
+For ATAC-seq data analysis, we made use of several reference hg38 region sets from multiple sources. Retrieval and assembly of these regions for use in downstream analysis are available in the R script `reference/get_reference_datasets.R`.
+
 [Return to Contents](#con)
 
 ------------
