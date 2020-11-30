@@ -105,7 +105,7 @@ Preprocessing and analysis scripts were generated and run on Linux/Unix-like pla
 
 These software tools are used in various parts of our analysis and processing scripts:
 
-*command-line tools*
+*command-line tools*  
 [`bcl2fastq`](https://support.illumina.com/sequencing/sequencing_software/bcl2fastq-conversion-software.html)  
 [`cellranger-atac count` >= v1.0.0](https://support.10xgenomics.com/single-cell-atac/software/pipelines/latest/using/count)   
 [`bedtools2`](https://github.com/arq5x/bedtools2/releases)  
