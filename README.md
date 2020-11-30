@@ -43,8 +43,6 @@
 - [Preprocessing](#tea-pre)  
 - [Analysis](#tea-ana)  
 
-#### [References](#ref)
-
 #### [Legal](#leg)
 - [License](#leg-lic)  
 - [Level of Support](#leg-lev)  
@@ -118,6 +116,8 @@ The references used for analysis are:
 <a name="sca"></a>
 
 ### scATAC-seq
+
+*TODO*
 
 <a name="sca-req"></a>
 
@@ -343,12 +343,19 @@ Rscript 04_run_archr_atac_analysis.R \
 #### scATAC-seq Analysis
 
 *Figure 1*  
+[scatac_analysis/Figure-1_analysis.Rmd](https://github.com/AllenInstitute/aifi-swanson-teaseq/blob/master/scatac_analysis/Figure-1_analysis.Rmd)
 
 *Figure 1 - Figure Supplement 2*  
+[scatac_analysis/Figure-1-FS-2_analysis.Rmd](https://github.com/AllenInstitute/aifi-swanson-teaseq/blob/master/scatac_analysis/Figure-1-FS-2_analysis.Rmd)
 
 *Figure 1 - Figure supplement 5*  
+[scatac_analysis/Figure-1-FS-5_analysis.Rmd](https://github.com/AllenInstitute/aifi-swanson-teaseq/blob/master/scatac_analysis/Figure-1-FS-5_analysis.Rmd)
 
 *Figure 2*  
+[scatac_analysis/Figure-2_analysis.Rmd](https://github.com/AllenInstitute/aifi-swanson-teaseq/blob/master/scatac_analysis/Figure-1-FS-5_analysis.Rmd)
+
+*Table 1*
+[scatac_analysis/Table-1_analysis.Rmd](https://github.com/AllenInstitute/aifi-swanson-teaseq/blob/master/scatac_analysis/Figure-1-FS-5_analysis.Rmd)
 
 [Return to Contents](#con)
 
@@ -426,7 +433,7 @@ Processed data from ICICLE-seq datasets used in Swanson, *et al.* will be availa
 
 #### ICICLE-seq Preprocessing
 
-*TODO*  
+[icicle_preprocessing/ICICLE-seq_preprocessing.py](https://github.com/AllenInstitute/aifi-swanson-teaseq/blob/master/icicle_preprocessing/ICICLE-seq_preprocessing.py)
 
 [Return to Contents](#con)
 
@@ -468,7 +475,15 @@ Processed data from ICICLE-seq datasets used in Swanson, *et al.* will be availa
 
 #### TEA-seq Preprocessing
 
-*TODO*  
+[teaseq_preprocessing/TEA-seq_Joint_Flowcell_bcl2fastq.sh](https://github.com/AllenInstitute/aifi-swanson-teaseq/blob/master/teaseq_preprocessing/TEA-seq_Joint_Flowcell_bcl2fastq.sh)
+
+*cellranger-arc count*
+
+*BarCounter*
+
+*ATAC QC*
+
+*Add RNA metadata*
 
 [Return to Contents](#con)
 
@@ -481,26 +496,6 @@ Processed data from ICICLE-seq datasets used in Swanson, *et al.* will be availa
 *Figure 4 - Figure Supplement 1*  
 
 *Figure 4 - Figure Supplement 2*  
-
-[Return to Contents](#con)
-
-<a name="ref"></a>
-
-#### References
-
-ArchR:  
-
-BedTools:  
-
-GNU Parallel:  
-
-SAMTools:  
-
-Seurat:  
-
-Signac:  
-
-scrattch.vis:  
 
 [Return to Contents](#con)
 

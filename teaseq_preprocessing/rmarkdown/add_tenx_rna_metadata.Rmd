@@ -1,0 +1,515 @@
+---
+title: "Add .h5 metadata to 10x Genomics data"
+author: 
+ - Lucas Graybuck
+date: "`r format(Sys.time(), '%Y-%m-%d')`"
+output:
+  html_document:
+    code_folding: hide
+    df_print: paged
+    self_contained: true
+params:
+  in_h5: NULL
+  in_mol: NULL
+  in_sum: NULL
+  in_key: NULL
+  in_well: NULL
+  out_dir: NULL
+---
+
+<a id="contents"></a>
+
+## Contents
+
+#### [Data Processing](#data_processing)
+- [Session Preparation](#session_preparation)
+- [Load Inputs](#load_inputs)
+- [Assemble Metadata](#assemble data)
+- [Data Output](#data_output)
+
+#### [QC Metrics and Plots](#qc_metrics)
+- [Well-Based QC](#well_qc)
+  - [10x Genomics Metrics](#well_metrics)
+  - [Read/UMI/Gene Stats](#rug_stats)
+  - [Read/UMI/Gene Histograms](#rug_hists)
+  - [Read/UMI/Gene Scatters](#rug_scatters)
+- [Write QC JSON](#json_out)
+
+#### [Session Info](#session_info)
+
+<a id="data_processing"></a>
+
+## Data Processing
+
+<a id="session_preparation"></a>
+
+### Session Preparation
+
+#### Load libraries:
+```{r Load Libraries}
+start_time <- Sys.time()
+
+quiet_library <- function(...) {
+  suppressPackageStartupMessages(library(...))
+}
+quiet_library(rhdf5)
+quiet_library(H5weaver)
+quiet_library(Matrix)
+quiet_library(ggplot2)
+quiet_library(cowplot)
+quiet_library(jsonlite)
+```
+
+Declaring start
+```{r Declare start}
+stm("Starting .h5 metadata analysis")
+```
+
+#### Argument parsing
+```{r Parse arguments}
+if(is.null(params$in_h5)) {
+  in_h5 <- system.file("testdata/well1.h5", package = "H5weaver")
+  in_mol <- system.file("testdata/well1_molecule_info.h5", package = "H5weaver")
+  in_sum <- system.file("testdata/well1_metrics_summary.csv", package = "H5weaver")
+  in_key <- system.file("reference/SampleSheet_fallback.csv", package = "H5weaver")
+  in_well <- "B000-P0C0W0"
+  out_dir <- tempdir()
+} else {
+  in_h5 <- params$in_h5
+  in_mol <- params$in_mol
+  in_sum <- params$in_sum
+  in_key <- params$in_key
+  in_well <- params$in_well
+  out_dir <- params$out_dir
+}
+
+in_well <- sub("-[AHR]P","-P",in_well)
+
+# Check Well ID format
+if(!grepl("^[A-Z][0-9]{3}-P[0-9]C[0-9]W[0-9]$", in_well)) {
+  stm(paste0("ERROR: Input Well ID is not in expected format, e.g. B###-P#C#W# :", in_h5))
+  stop()
+}
+
+stm(paste0("IN  H5 file         : ", in_h5))
+stm(paste0("IN  Mol Info H5     : ", in_mol))
+stm(paste0("IN  Metrics Summary : ", in_sum))
+stm(paste0("IN  SampleSheet     : ", in_key))
+stm(paste0("IN  Well ID         : ", in_well))
+stm(paste0("OUT H5 directory    : ", out_dir))
+```
+
+#### Input Parameters
+```{r Print Arguments}
+print(c(
+  paste0("IN  H5 file         : ", in_h5),
+  paste0("IN  Mol Info H5     : ", in_mol),
+  paste0("IN  Metrics Summary : ", in_sum),
+  paste0("IN  SampleSheet     : ", in_key),
+  paste0("IN  Well ID         : ", in_well),
+  paste0("OUT H5 directory    : ", out_dir)
+))
+```
+
+#### Check Input Files
+```{r Check Inputs}
+if(!file.exists(in_h5)) {
+  stm(paste0("ERROR: Cannot find IN H5 file:", in_h5))
+  stop()
+}
+if(!file.exists(in_mol)) {
+  stm(paste0("ERROR: Cannot find IN Mol Info H5 file:", in_mol))
+  stop()
+}
+if(!file.exists(in_sum)) {
+  stm(paste0("ERROR: Cannot find IN Metrics Summary file:", in_sum))
+  stop()
+}
+if(!file.exists(in_key)) {
+  stm(paste0("ERROR: Cannot find IN SampleSheet file:", in_key))
+  stop()
+}
+```
+
+#### Create out directory if missing
+```{r Create Out Dir}
+if(!dir.exists(out_dir)) {
+  stm(paste0("Creating Output Directory: ",out_dir))
+  dir.create(out_dir, 
+             recursive = TRUE)
+}
+```
+
+
+[Return to Contents](#contents)
+
+<a id="load_inputs"></a>
+
+### Load inputs
+
+#### Load scRNA-seq Dataset
+```{r Load Query}
+stm(paste0("Loading HDF5 from ", in_h5))
+h5_list <- h5dump(in_h5)
+```
+
+#### Load SampleSheet
+```{r Load SampleSheet}
+stm(paste0("Reading SampleSheet from ",in_key))
+ss <- read.csv(in_key)
+
+if("HashTag" %in% names(ss)) {
+  out_h5 <- file.path(out_dir, paste0(in_well, ".h5"))
+  out_json <- sub(".h5$","_well_metrics.json",out_h5)
+
+} else if("WellID" %in% names(ss)) {
+  pool_id <- sub("C.+","", in_well)
+  pool_id <- sub("-[A|H|R]P","-P", pool_id)
+  
+  ss$WellID <- sub("-[A|H|R]P","-P", ss$WellID)
+  
+  pbmc_sample_id <- ss$SampleID[ss$WellID == in_well]
+  
+  n_cells <- length(h5_list$matrix$barcodes)
+  h5_list <- set_list_path(h5_list,
+                           "/matrix/observations/pbmc_sample_id",
+                           rep(pbmc_sample_id, n_cells))
+  
+  out_h5 <- file.path(out_dir, paste0(pool_id, "_", pbmc_sample_id, ".h5"))
+  out_json <- file.path(out_dir, paste0(in_well,"_well_metrics.json"))
+}
+
+
+stm(paste0("OUT H5 file         : ", out_h5))
+stm(paste0("OUT JSON file       : ", out_json))
+
+print(c(
+  paste0("OUT H5 file         : ", out_h5),
+  paste0("OUT JSON file       : ", out_json)
+))
+```
+
+#### Read molecule info to get read counts per cell
+```{r Assemble Read Counts}
+stm(paste0("Assembling Read Counts per Cell from ", in_mol))
+
+bc <- sub("-1","",h5_list$matrix$barcodes)
+
+bc_counts <- data.table(mol_idx = h5read(in_mol, "/barcode_idx"),
+                        umi_count = h5read(in_mol, "/count"))
+
+bc_sums <- bc_counts[, .(n_reads = sum(umi_count)), by = mol_idx]
+rm(bc_counts)
+
+mol_bc <- h5read(in_mol, "/barcodes")
+bc_sums$cell_barcode <- mol_bc[bc_sums$mol_idx + 1]
+rm(mol_bc)
+
+bc_sums <- bc_sums[,.(cell_barcode, n_reads)]
+
+n_reads <- bc_sums$n_reads[match(bc, bc_sums$cell_barcode)]
+n_reads[is.na(n_reads)] <- 0
+
+h5_list <- set_list_path(h5_list,
+                           "/matrix/observations/n_reads",
+                           n_reads)
+```
+
+[Return to Contents](#contents)
+
+<a id="assemble_data"></a>
+
+### Assemble data
+
+#### Compute N UMIs and N Genes per cell
+```{r n_umi and n_genes}
+stm("Computing UMI and Gene Counts per Cell")
+
+h5_list <- h5_list_convert_to_dgCMatrix(h5_list, target = "matrix")
+
+h5_list <- set_list_path(h5_list,
+                         "/matrix/observations/n_umis",
+                         unname(colSums(h5_list$matrix_dgCMatrix)))
+
+h5_list <- set_list_path(h5_list,
+                         "/matrix/observations/n_genes",
+                         unname(colSums(h5_list$matrix_dgCMatrix > 0)))
+
+h5_list <- h5_list_convert_from_dgCMatrix(h5_list, target = "matrix")
+```
+
+#### Add cell ids
+```{r}
+stm("Adding Cell UUIDs and Names")
+
+h5_list <-add_cell_ids(h5_list,
+                       add_uuid = TRUE,
+                       replace_barcode = TRUE,
+                       retain_original_barcode = TRUE,
+                       add_name = TRUE)
+```
+
+#### Generate Chip, Pool, and Batch IDs based on well_id
+```{r Chip Pool Batch}
+stm("Adding Batch, Pool, Chip, and Well metadata")
+
+h5_list <- add_well_metadata(h5_list,
+                             well_id = in_well)
+```
+
+#### Add chrM gene counts
+```{r chrM UMIs}
+stm("Adding chrM count metadata")
+
+h5_list <- h5_list_add_mito_umis(h5_list)
+```
+
+#### Add Well Metrics
+```{r Add Well Metrics}
+well_metrics <- read_tenx_metrics(in_sum)
+
+well_metrics <- as.list(well_metrics)
+
+h5_list <- set_list_path(h5_list,
+                         "/well",
+                         well_metrics)
+
+h5_list <- set_list_path(h5_list,
+                         "/well/well_id",
+                         in_well)
+```
+
+
+[Return to Contents](#contents)
+
+<a id="data_output"></a>
+
+### Write Output
+
+#### Write HDF5 files
+```{r Write split files}
+stm(paste0("Writing HDF5 to ", out_h5))
+write_h5_list(h5_list,
+              h5_file = out_h5,
+              overwrite = TRUE)
+h5closeAll()
+```
+
+[Return to Contents](#contents)
+
+<a id="qc_metrics"></a>
+
+## QC Tables and Plots
+
+Extract metadata for plotting
+```{r Assemble Metadata}
+stm("Generating tables and plots for report")
+meta <- h5_list_cell_metadata(h5_list)
+
+qc_list <- list(report_type = "add_tenx_rna_metadata",
+                report_datetime = as.character(start_time),
+                report_uuid = ids::uuid(use_time = TRUE),
+                package = "H5weaver",
+                package_version = sessionInfo()$otherPkgs$H5weaver$Version,
+                well_id = in_well)
+```
+
+[Return to Contents](#contents)
+
+<a id="well_qc"></a>
+
+### Well QC
+
+<a id="well_metrics"></a>
+
+#### 10x Genomics Mapping Metrics
+```{r Well Metrics}
+qc_well_metrics <- data.frame(tenx_metric = names(well_metrics),
+                              value = as.vector(unlist(well_metrics)),
+                              stringsAsFactors = FALSE)
+
+qc_well_metrics$value[qc_well_metrics$tenx_metric == "number_of_reads"] <- as.numeric(qc_well_metrics$value[qc_well_metrics$tenx_metric == "number_of_reads"] / 1e6)
+qc_well_metrics$tenx_metric[qc_well_metrics$tenx_metric == "number_of_reads"] <- "millions_of_reads"
+
+qc_list$well_metrics <- split(qc_well_metrics$value, 1:nrow(qc_well_metrics))
+names(qc_list$well_metrics) <- qc_well_metrics$tenx_metric
+
+qc_table(qc_well_metrics)
+```
+
+[Return to Contents](#contents)
+
+<a id="rug_stats"></a>
+
+#### Well Read/UMI/Gene Summary Stats
+```{r Read UMI Gene Stats}
+overview_stats <- data.frame(statistic = c("N Mapped Reads",
+                                           "N UMIs",
+                                           "N Mito. UMIs",
+                                           "N Genes",
+                                           "Reads per UMI",
+                                           "UMIs per Gene",
+                                           "Reads per Gene"),
+                             q_25 = c(quantile(meta$n_reads, 0.25),
+                                      quantile(meta$n_umis,  0.25),
+                                      quantile(meta$n_mito_umis, 0.25),
+                                      quantile(meta$n_genes, 0.25),
+                                      quantile(meta$n_reads/meta$n_umis, 0.25, na.rm = TRUE),
+                                      quantile(meta$n_umis/meta$n_genes, 0.25, na.rm = TRUE),
+                                      quantile(meta$n_reads/meta$n_genes, 0.25, na.rm = TRUE)),
+                             median = c(quantile(meta$n_reads, 0.5),
+                                        quantile(meta$n_umis,  0.50),
+                                        quantile(meta$n_mito_umis, 0.50),
+                                        quantile(meta$n_genes, 0.50),
+                                        quantile(meta$n_reads/meta$n_umis, 0.50, na.rm = TRUE),
+                                        quantile(meta$n_umis/meta$n_genes, 0.50, na.rm = TRUE),
+                                        quantile(meta$n_reads/meta$n_genes, 0.50, na.rm = TRUE)),
+                             q_75 = c(quantile(meta$n_reads, 0.75),
+                                      quantile(meta$n_umis,  0.75),
+                                      quantile(meta$n_mito_umis, 0.25),
+                                      quantile(meta$n_genes, 0.75),
+                                      quantile(meta$n_reads/meta$n_umis, 0.75, na.rm = TRUE),
+                                      quantile(meta$n_umis/meta$n_genes, 0.75, na.rm = TRUE),
+                                      quantile(meta$n_reads/meta$n_genes, 0.75, na.rm = TRUE)))
+
+overview_stats$q_25 <- round(overview_stats$q_25, 2)
+overview_stats$median <- round(overview_stats$median, 2)
+overview_stats$q_75 <- round(overview_stats$q_75, 2)
+
+qc_list$well_count_stats <- lapply(1:nrow(overview_stats),
+                                      function(x) {
+                                        list(q_25 = overview_stats$q_25[x],
+                                             median = overview_stats$median[x],
+                                             q_75 = overview_stats$q_75[x])
+                                      })
+names(qc_list$well_count_stats) <- tolower(gsub("[\\. ]+", "_", overview_stats$statistic))
+
+qc_table(overview_stats)
+```
+
+[Return to Contents](#contents)
+
+<a id="rug_hists"></a>
+
+### Well Read/UMI/Gene Histograms
+```{r QC histograms}
+reads_plot <- qc_hist_plot(meta,
+                           column = "n_reads",
+                           name_x = "N Reads per Cell",
+                           fill = "dodgerblue",
+                           target = 2e4) +
+  ggtitle("Alignment/Mapping Distributions")
+
+umis_plot <- qc_hist_plot(meta,
+                          column = "n_umis",
+                          name_x = "N UMIs per Cell",
+                          fill = "purple",
+                          target = 8e3)
+
+genes_plot <- qc_hist_plot(meta,
+                           column = "n_genes",
+                           name_x = "N Genes per Cell",
+                           fill = "orangered",
+                           target = 2e3)
+
+histogram_list <- list(reads_plot,
+                       umis_plot,
+                       genes_plot)
+
+suppressWarnings(
+  plot_grid(plotlist = histogram_list,
+            ncol = 1,
+            nrow = 3)
+)
+```
+
+[Return to Contents](#contents)
+
+<a id="rug_scatters"></a>
+
+#### UMIs vs Reads Scatter Plot
+```{r Read UMI Gene Scatter Plots}
+umi_reads_scatter <- qc_scatter_plot(meta,
+                                     column_x = "n_reads",
+                                     name_x = "N Reads per Cell",
+                                     column_y = "n_umis",
+                                     name_y = "N UMIs per Cell",
+                                     color = "darkblue") +
+  ggtitle("UMIs vs Reads")
+
+suppressWarnings(
+  umi_reads_scatter
+)
+```
+
+#### Genes vs UMIs Scatter Plot
+```{r}
+genes_umis_scatter <- qc_scatter_plot(meta,
+                                      column_x = "n_umis",
+                                      name_x = "N UMIs per Cell",
+                                      column_y = "n_genes",
+                                      name_y = "N Genes per Cell",
+                                      color = "red") +
+  ggtitle("Genes vs UMIs")
+
+suppressWarnings(
+  genes_umis_scatter
+)
+```
+
+#### Genes vs Reads Scatter Plot
+```{r}
+genes_reads_scatter <- qc_scatter_plot(meta,
+                                       column_x = "n_reads",
+                                       name_x = "N Reads per Cell",
+                                       column_y = "n_genes",
+                                       name_y = "N Genes per Cell",
+                                       color = "darkgreen") +
+  ggtitle("Genes vs Reads")
+
+suppressWarnings(
+  genes_reads_scatter
+)
+```
+
+[Return to Contents](#contents)
+
+<a id="json_out"></a>
+
+### Write QC JSON
+
+```{r Save QC JSON}
+stm(paste0("Writing JSON to ", out_json))
+
+qc_list_json <- jsonlite::toJSON(qc_list,
+                                 auto_unbox = TRUE,
+                                 pretty = TRUE)
+
+writeLines(qc_list_json,
+           out_json)
+
+```
+
+[Return to Contents](#contents)
+
+<a id="session_info"></a>
+
+## Session Information
+
+```{r Session Info}
+sessionInfo()
+```
+
+Total time elapsed
+```{r Show Time}
+end_time <- Sys.time()
+diff_time <- end_time - start_time
+time_message <- paste0("Elapsed Time: ", 
+                       round(diff_time, 3),
+                       " ", units(diff_time))
+print(time_message)
+stm(time_message)
+stm("H5 metadata process complete.")
+```
+
+[Return to Contents](#contents)

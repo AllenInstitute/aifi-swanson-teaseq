@@ -112,24 +112,32 @@ split_start_time="$(date -u +%s)"
 prefixes="$(ls ${temp_dir}/whitelist | sed 's/[0-9]\+_//g' | sed 's/.tsv//g' | sort | uniq)"
 
 mkdir ${temp_dir}/frag_filt/
+mkdir ${temp_dir}/frag_fail/ 
 parallel -j ${num_jobs} \
   --bar \
   "cat ${temp_dir}/whitelist/{}.tsv \
     ${temp_dir}/frag/*_{}.bed \
   | awk -F'\t' -v OFS='\t' \
-    '{ if(NF==2){w[\$1]=\$2;next} else if(\$4 in w) {print \$1,\$2,\$3,w[\$4],\$5} }' \
-  > ${temp_dir}/frag_filt/{/.}.bed" \
+    -v p=${temp_dir}/frag_filt/{/.}.bed \
+    -v f=${temp_dir}/frag_fail/{/.}.bed \
+    '{ if(NF==2){w[\$1]=\$2;next} else if(\$4 in w) {print \$1,\$2,\$3,w[\$4],\$5 > p} else {print \$0 > f} }' " \
   ::: $prefixes
 
 echo $(stm "$(elt $split_start_time $total_start_time)" )
 
 split_start_time="$(date -u +%s)"
 
-echo $(stm "Reassembling fragments")
+echo $(stm "Reassembling passing fragments")
 
 cat ${temp_dir}/frag_filt/* \
   | sort -k1,1 -k2,2n -k3,3n \
   > ${output_dir}/${sample_name}_filtered_fragments.tsv
+
+echo $(stm "Reassembling failing fragments")
+
+cat ${temp_dir}/frag_fail/* \
+  | sort -k1,1 -k2,2n -k3,3n \
+  > ${output_dir}/${sample_name}_failed_fragments.tsv
 
 echo $(stm "$(elt $split_start_time $total_start_time)" )
 
@@ -138,6 +146,7 @@ split_start_time="$(date -u +%s)"
 echo $(stm "Compressing outputs")
 
 bgzip ${output_dir}/${sample_name}_filtered_fragments.tsv
+bgzip ${output_dir}/${sample_name}_failed_fragments.tsv
 
 echo $(stm "$(elt $split_start_time $total_start_time)" )
 split_start_time="$(date -u +%s)"

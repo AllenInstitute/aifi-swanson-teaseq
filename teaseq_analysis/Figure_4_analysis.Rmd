@@ -1,0 +1,1120 @@
+---
+title: "Figure 4 analysis"
+author: "Lucas Graybuck"
+date: "11/3/2020"
+output: html_document
+---
+
+## Setup
+
+Load Packages
+```{r}
+quiet_library <- function(...) {
+  suppressPackageStartupMessages(library(...))
+}
+quiet_library(Seurat)
+quiet_library(H5weaver)
+quiet_library(readr)
+quiet_library(dplyr)
+quiet_library(purrr)
+quiet_library(ggplot2)
+quiet_library(ggrastr)
+quiet_library(cowplot)
+quiet_library(GenomicRanges)
+quiet_library(immutils)
+options(stringsAsFactors = FALSE)
+source("common/granges_helpers.R")
+```
+
+Source directories
+```{r}
+arc_dir <- "/mnt/x060-multiome/X061-Well1/outs/"
+atac_dir <- "/mnt/x060-multiome/X061-pipeline-analysis/atac_qc"
+rna_dir <- "/mnt/x060-multiome/X061-pipeline-analysis/rna_preprocessed"
+adt_dir <- "/mnt/x060-multiome/barcounter/X061_full/"
+```
+
+Selected wells:  
+X061-AP0C1W1, X061_dogma-seq-1, well 1 of Dogma-seq  
+```{r}
+wells_to_process <- list(nuc_no_facs = "X061_dogma-seq-1")
+well_labels <- c("Dogma-seq Well 1")
+```
+
+Locate files
+```{r}
+arc_meta_files <- file.path(arc_dir, "per_barcode_metrics.csv")
+atac_meta_files <- file.path(atac_dir, "B000_X061-Well1_all_metadata.csv.gz")
+atac_filtered_meta_files <- file.path(atac_dir, "B000_X061-Well1_filtered_metadata.csv.gz")
+rna_meta_files <- file.path(rna_dir, "X061-P0_X061-Well1_labeled.h5")
+adt_meta_files <- file.path(adt_dir, "X061-AP0C1W1-C_Tag_Counts.csv")
+```
+
+Read metadata files
+```{r message=FALSE}
+arc_meta_list <- map(arc_meta_files, read_csv)
+atac_meta_list <- map(atac_meta_files, read_csv)
+atac_filtered_meta_list <- map(atac_filtered_meta_files, read_csv)
+rna_meta_list <- map(rna_meta_files, read_h5_cell_meta)
+adt_meta_list <- map(adt_meta_files, read_csv)
+```
+
+```{r}
+atac_meta_list <- map2(atac_meta_list,
+                       atac_filtered_meta_list,
+                       function(atac_meta, atac_filtered_meta) {
+                         atac_meta %>%
+                           mutate(pass_fail = ifelse(
+                             n_unique > 1e3 & peaks_frac > 0.2 & tss_frac > 0.2 & altius_frac > 0.5,
+                             "Pass", "Fail"
+                           ))
+                       })
+```
+
+```{r}
+arc_meta <- do.call(rbind, arc_meta_list)
+atac_meta <- do.call(rbind, atac_meta_list)
+atac_filtered_meta <- do.call(rbind, atac_filtered_meta_list)
+rna_meta <- do.call(rbind, rna_meta_list)
+adt_meta <- do.call(rbind, adt_meta_list)
+```
+
+```{r}
+arc_meta$pass_fail <- "Fail"
+arc_meta$pass_fail[arc_meta$barcode %in% atac_meta$original_barcodes[atac_meta$pass_fail == "Pass"]] <- "Pass"
+
+arc_meta$cell_barcode <- sub("-1","",arc_meta$barcode)
+arc_meta$adt_umis <- adt_meta$total[match(arc_meta$cell_barcode, adt_meta$cell_barcode)]
+
+arc_meta$peaks_frac <- atac_meta$peaks_frac[match(arc_meta$barcode, atac_meta$original_barcodes)]
+```
+
+```{r}
+arc_plot_df <- arc_meta %>%
+         filter(atac_fragments > 100) %>%
+         filter(gex_umis_count > 100)
+```
+
+
+Output for Supp Data:
+```{r}
+arc_plot_sd <- arc_plot_df %>%
+  select(barcode, pass_fail, 
+         atac_fragments, peaks_frac,
+         gex_umis_count, gex_genes_count,
+         gex_exonic_umis, gex_intronic_umis) %>%
+  mutate(gex_exon_frac = gex_exonic_umis / gex_umis_count) %>%
+  arrange(desc(pass_fail), desc(atac_fragments))
+
+fwrite(arc_plot_sd,"Figure-4_Supp-Data-1_Barcode-QC-Metrics.csv.gz")
+```
+
+Intronic vs Exonic RNA UMIs from cellranger-arc outputs
+```{r fig.width = 1.5, fig.height = 1.5}
+intron_vs_exon <- ggplot(arc_plot_df) +
+  geom_point_rast(aes(x = log10(gex_umis_count+1),
+                      y = gex_exonic_umis / gex_umis_count,
+                      color = pass_fail),
+                  size = 0.5,
+                  raster.dpi = 150)+
+  scale_color_manual(breaks = c("Fail","Pass"),
+                     values = c("#404040","mediumorchid3")) +
+  scale_x_continuous(bquote(log[10]("RNA UMIs")),
+                     limits = c(2, 5)) +
+  scale_y_continuous("Fraction Exonic UMIs",
+                     limits = c(0,1)) +
+  theme_bw(base_size = 6) +
+  theme(legend.position = "none",
+        panel.grid.major = element_line(colour = "gray80",
+                                        size = 0.2),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text = element_text(colour = "black"))
+```
+
+RNA UMIs vs Genes from cellranger-arc outputs
+```{r fig.width = 1.5, fig.height = 1.5}
+rna_umis_vs_genes <- ggplot(arc_meta %>%
+         filter(atac_fragments > 100) %>%
+         filter(gex_umis_count > 100)) +
+  geom_point_rast(aes(x = log10(gex_umis_count+1),
+                      y = log10(gex_genes_count+1),
+                      color = pass_fail),
+                  size = 0.5,
+                  raster.dpi = 150)+
+  scale_color_manual(breaks = c("Fail","Pass"),
+                     values = c("#404040","mediumorchid3")) +
+  scale_x_continuous(bquote(log[10]("RNA UMIs")),
+                     limits = c(2, 4.5)) +
+  scale_y_continuous(bquote(log[10]("Genes Detected")),
+                     limits = c(2,4)) +
+  theme_bw(base_size = 6) +
+  theme(legend.position = "none",
+        panel.grid.major = element_line(colour = "gray80",
+                                        size = 0.2),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text = element_text(colour = "black"))
+```
+
+ATAC UMIs vs RNA UMIs from cellranger-arc outputs
+```{r fig.width = 1.5, fig.height = 1.5}
+atac_vs_rna <- ggplot(arc_meta %>%
+         filter(atac_fragments > 100) %>%
+         filter(gex_umis_count > 100)) +
+  geom_point_rast(aes(x = log10(atac_fragments+1),
+                 y = log10(gex_umis_count+1),
+                 color = pass_fail),
+                 size = 0.5,
+                 raster.dpi = 150)+
+  scale_color_manual(breaks = c("Fail","Pass"),
+                     values = c("#404040","mediumorchid3")) +
+  scale_x_continuous(bquote(log[10]("Unique ATAC Fragments")),
+                     limits = c(2, 5)) +
+  scale_y_continuous(bquote(log[10]("RNA UMIs")),
+                     limits = c(2, 4.5)) +
+  theme_bw(base_size = 6) +
+  theme(legend.position = "none",
+        panel.grid.major = element_line(colour = "gray80",
+                                        size = 0.2),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text = element_text(colour = "black"))
+```
+
+ATAC UMIs vs ADT UMIs from cellranger-arc and barcounter
+```{r fig.width = 1.5, fig.height = 1.5}
+
+atac_vs_adt <- ggplot(arc_meta %>%
+         filter(atac_fragments > 100,
+                adt_umis > 100)) +
+  geom_point_rast(aes(x = log10(atac_fragments+1),
+                      y = log10(adt_umis+1),
+                      color = pass_fail),
+                  size = 0.5,
+                  raster.dpi = 150)+
+  scale_color_manual(breaks = c("Fail","Pass"),
+                     values = c("#404040","mediumorchid3")) +
+  scale_x_continuous(bquote(log[10]("Unique ATAC Fragments")),
+                     limits = c(2, 5)) +
+  scale_y_continuous(bquote(log[10]("ADT UMIs")),
+                     limits = c(2, 4.5)) +
+  theme_bw(base_size = 6) +
+  theme(legend.position = "none",
+        panel.grid.major = element_line(colour = "gray80",
+                                        size = 0.2),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text = element_text(colour = "black"))
+```
+
+## Reads vs FRIP plots
+
+Generate depth vs FRIP plots
+```{r}
+reads_vs_frip <- ggplot(atac_meta) +
+  geom_point_rast(aes(x = n_unique,
+                      y = peaks_frac,
+                      color = pass_fail),
+                  size = 0.5,
+                  raster.dpi = 150) +
+  scale_color_manual(breaks = c("Fail","Pass"),
+                     values = c("#404040","mediumorchid3")) +
+  scale_x_log10(limits = c(8e2, 2e5),
+                breaks = c(1e3, 1e4, 1e5),
+                labels = c("1k", "10k", "100k"),
+                expand = c(0,0)) +
+  xlab(bquote(log[10]("Unique ATAC Fragments"))) +
+  scale_y_continuous("FRIP",
+                     limits = c(0, 1),
+                     expand = c(0,0)) +
+  theme_bw(base_size = 6) +
+  theme(legend.position = "none",
+        panel.grid.major = element_line(colour = "gray80",
+                                        size = 0.2),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text = element_text(colour = "black"))
+
+```
+
+Preview QC plots
+```{r fig.width = 7.5, fig.height = 1.5}
+qc_plot_grid <- plot_grid(plotlist = list(atac_vs_rna,
+                                          atac_vs_adt,
+                                          reads_vs_frip,
+                                          rna_umis_vs_genes,
+                                          intron_vs_exon),
+                                     ncol = 5)
+qc_plot_grid
+```
+
+
+Save plots
+```{r}
+ggsave("Figure_4A_QC_scatters.pdf",
+       qc_plot_grid,
+       width = 7.5, height = 1.5,
+       useDingbats = FALSE)
+```
+
+### UMAPs
+Label transfer
+```{r}
+if(!file.exists("labeled_joint_seurat_object.rds")) {
+  so <- readRDS("joint_seurat_object.rds")
+  
+  library(SeuratLabeler)
+  ref_so <- variable_pbmc_10k_v3
+  
+  DefaultAssay(so) <- "RNA"
+  so <- NormalizeData(so)
+  ta <- FindTransferAnchors(reference = ref_so,
+                            query = so,
+                            normalization.method = "LogNormalize",
+                            features = VariableFeatures(object = ref_so),
+                            reduction = "cca")
+  lp <- TransferData(anchorset = ta,
+                     refdata = ref_so$celltype,
+                     weight.reduction = "cca")
+  
+  so <- AddMetaData(object = so,
+                    metadata = lp)
+  saveRDS(so, "labeled_joint_seurat_object.rds")
+  
+} else {
+  so <- readRDS("labeled_joint_seurat_object.rds")
+}
+
+```
+
+
+```{r}
+type_anno <- read.table("common/rna_seurat_pbmc_type_anno.tsv", header = T, sep = "\t", comment.char = "|")
+```
+
+
+```{r}
+so_meta <- so@meta.data
+so_meta$barcode <- rownames(so_meta)
+so_meta$pass_fail <- arc_meta$pass_fail[match(so_meta$barcode, arc_meta$barcode)]
+so_meta$seurat_pbmc_type <- rna_meta$seurat_pbmc_type[match(sub("-1","",so_meta$barcode), rna_meta$original_barcodes)]
+#so <- so[so_meta$barcode[so_meta$pass_fail],]
+so_meta <- left_join(so_meta, type_anno)
+```
+
+
+Independent assay UMAPs
+```{r}
+rna_umap_df <- as.data.frame(so@reductions$umap@cell.embeddings)
+names(rna_umap_df) <- c("x","y")
+rna_umap_df <- cbind(rna_umap_df, so_meta) %>%
+  arrange(prediction.score.max)
+
+atac_umap_df <- as.data.frame(so@reductions$atac_umap@cell.embeddings)
+names(atac_umap_df) <- c("x","y")
+atac_umap_df <- cbind(atac_umap_df, so_meta) %>%
+  arrange(prediction.score.max)
+
+adt_umap_df <- as.data.frame(so@reductions$adt_umap@cell.embeddings)
+names(adt_umap_df) <- c("x","y")
+adt_umap_df <- cbind(adt_umap_df, so_meta) %>%
+  arrange(prediction.score.max)
+
+```
+
+```{r}
+rna_umap <- ggplot(rna_umap_df) +
+  geom_point_rast(aes(x = x,
+                      y = y,
+                      color = seurat_pbmc_type_color),
+                  size = 0.5,
+                  raster.dpi = 150) +
+  scale_color_identity() +
+  scale_x_continuous("RNA UMAP 1") +
+  scale_y_continuous("RNA UMAP 2") +
+  ggtitle("RNA Only") +
+  theme_bw(base_size = 6) +
+  theme(legend.position = "none")
+
+
+atac_umap <- ggplot(atac_umap_df) +
+  geom_point_rast(aes(x = x,
+                      y = y,
+                      color = seurat_pbmc_type_color),
+                  size = 0.5,
+                  raster.dpi = 150) +
+  scale_color_identity() +
+  scale_x_continuous("ATAC UMAP 1") +
+  scale_y_continuous("ATAC UMAP 2") +
+  ggtitle("ATAC Only") +
+  theme_bw(base_size = 6) +
+  theme(legend.position = "none")
+
+adt_umap <- ggplot(adt_umap_df) +
+  geom_point_rast(aes(x = x,
+                      y = y,
+                      color = seurat_pbmc_type_color),
+                  size = 0.5,
+                  raster.dpi = 150) +
+  scale_color_identity() +
+  scale_x_continuous("ADT UMAP 1") +
+  scale_y_continuous("ADT UMAP 2") +
+  ggtitle("ADT Only") +
+  theme_bw(base_size = 6) +
+  theme(legend.position = "none")
+```
+
+```{r fig.width = 7.5, fig.height = 2.5}
+single_method_umaps <- plot_grid(rna_umap, atac_umap, adt_umap,
+                                 ncol = 3)
+single_method_umaps
+```
+
+```{r}
+ggsave("Figure_4B_single_method_umap.pdf",
+       single_method_umaps,
+       width = 7.5,
+       height = 2.5)
+```
+
+```{r}
+so_wnn <- FindMultiModalNeighbors(
+  so,
+  reduction.list = list("pca","atac_lsi","adt_pca"),
+  k.nn = 20,
+  dims.list = list(1:30, 2:30, 1:15),
+  cross.contant.list = list(1e-04, 1e-04, 1e-04))
+```
+
+```{r}
+so_wnn <- RunUMAP(
+  so_wnn,
+  nn.name = "weighted.nn",
+  reduction.name = "wnn.umap",
+  reduction.key = "wnnUMAP_")
+```
+
+```{r}
+wnn_umap_df <- as.data.frame(so_wnn@reductions$wnn.umap@cell.embeddings)
+names(wnn_umap_df) <- c("x","y")
+wnn_umap_df <- cbind(wnn_umap_df, so_meta) %>%
+  arrange(prediction.score.max)
+
+```
+
+```{r}
+wnn_umap <- ggplot(wnn_umap_df) +
+  geom_point_rast(aes(x = x,
+                      y = y,
+                      color = seurat_pbmc_type_color),
+                  size = 0.2,
+                  raster.dpi = 150) +
+  scale_color_identity() +
+  scale_x_continuous("WNN UMAP 1") +
+  scale_y_continuous("WNN UMAP 2") +
+  ggtitle("3-way WNN") +
+  theme_bw(base_size = 6) +
+  large_guides()
+```
+
+```{r fig.width = 5, fig.height = 5}
+wnn_umap
+```
+
+```{r}
+ggsave("Figure_4C_WNN_UMAP.pdf",
+       wnn_umap,
+       width = 5,
+       height = 5)
+```
+
+### Marker plots
+```{r}
+atac_gs_res <- readRDS("atac_GeneScore_matrix.rds")
+atac_gs_mat <- SummarizedExperiment::assay(atac_gs_res)
+colnames(atac_gs_mat) <- sub(".+#","",colnames(atac_gs_mat))
+rownames(atac_gs_mat) <- atac_gs_res@elementMetadata$name
+```
+
+```{r}
+wnn_cd8_df <- wnn_umap_df
+wnn_cd8_df$rna_cd8 <- as.vector(so_wnn[["RNA"]]["CD8A",rownames(wnn_umap_df)])
+wnn_cd8_df$adt_cd8 <- as.vector(so_wnn[["ADT"]]["CD8a",rownames(wnn_umap_df)])
+wnn_cd8_df$atac_cd8 <- as.vector(atac_gs_mat["CD8A", rownames(wnn_umap_df)])
+
+atac_cd8_q <- quantile(wnn_cd8_df$atac_cd8, c(0.01,0.99))
+wnn_cd8_df$atac_cd8[wnn_cd8_df$atac_cd8 > atac_cd8_q[2]] <- atac_cd8_q[2]
+
+atac_cd8_umap <- ggplot(wnn_cd8_df %>%
+                          arrange(atac_cd8)) +
+  geom_point_rast(aes(x = x,
+                      y = y,
+                      color = atac_cd8),
+                  size = 0.5,
+                  raster.dpi = 150) +
+  scale_color_gradient("", low = "skyblue", high = "darkred") +
+  scale_x_continuous("WNN UMAP 1") +
+  scale_y_continuous("WNN UMAP 2") +
+  ggtitle("ATAC: CD8A GeneScore") +
+  theme_bw(base_size = 6) +
+  theme(axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank(),
+        panel.grid.minor = element_blank())
+
+rna_cd8_umap <- ggplot(wnn_cd8_df %>%
+                         arrange(rna_cd8)) +
+  geom_point_rast(aes(x = x,
+                      y = y,
+                      color = rna_cd8),
+                  size = 0.5,
+                  raster.dpi = 150) +
+  scale_color_gradient("", low = "skyblue", high = "darkred") +
+  scale_x_continuous("WNN UMAP 1") +
+  scale_y_continuous("WNN UMAP 2") +
+  ggtitle("RNA: CD8A UMIs") +
+  theme_bw(base_size = 6) +
+  theme(axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank(),
+        panel.grid.minor = element_blank())
+
+adt_cd8_umap <- ggplot(wnn_cd8_df %>%
+                         arrange(adt_cd8)) +
+  geom_point_rast(aes(x = x,
+                      y = y,
+                      color = adt_cd8),
+                  size = 0.5,
+                  raster.dpi = 150) +
+  scale_color_gradient("", low = "skyblue", high = "darkred") +
+  scale_x_continuous("WNN UMAP 1") +
+  scale_y_continuous("WNN UMAP 2") +
+  ggtitle("Protein: CD8A UMIs") +
+  theme_bw(base_size = 6) +
+  theme(axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank(),
+        panel.grid.minor = element_blank())
+```
+
+```{r fig.width = 1.5, fig.height = 3}
+cd8_plots <- plot_grid(atac_cd8_umap,
+                       rna_cd8_umap,
+                       adt_cd8_umap,
+                       ncol = 1, nrow = 3)
+cd8_plots
+```
+
+```{r}
+ggsave("Figure_4D_CD8A_UMAP.pdf",
+       cd8_plots,
+       width = 2,
+       height = 5)
+```
+
+
+Ouput for Supp Data
+```{r}
+umap_sd <- wnn_cd8_df %>%
+  dplyr::rename(seurat_pmbc_type_score = prediction.score.max,
+                wnn_umap_1 = x,
+                wnn_umap_2 = y,
+                cd8_atac_genescore = atac_cd8,
+                cd8_rna_lognorm = rna_cd8,
+                cd8_adt_lognorm = adt_cd8) %>%
+  select(barcode, seurat_pbmc_type, seurat_pmbc_type_score, seurat_pbmc_type_color,
+         cd8_atac_genescore, cd8_rna_lognorm, cd8_adt_lognorm,
+         wnn_umap_1, wnn_umap_2)
+
+umap_sd <- umap_sd %>%
+  left_join(atac_umap_df %>%
+              dplyr::rename(atac_umap_1 = x,
+                            atac_umap_2 = y) %>%
+              select(barcode, atac_umap_1, atac_umap_2)) %>%
+  left_join(rna_umap_df %>%
+              dplyr::rename(rna_umap_1 = x,
+                            rna_umap_2 = y) %>%
+              select(barcode, rna_umap_1, rna_umap_2)) %>%
+  left_join(adt_umap_df %>%
+              dplyr::rename(adt_umap_1 = x,
+                            adt_umap_2 = y) %>%
+              select(barcode, adt_umap_1, adt_umap_2))
+
+fwrite(umap_sd,
+       "Figure-4_Supp-Data-2_Type-Labels_UMAP-Coords.csv.gz")
+```
+
+
+
+```{r}
+ggplot() +
+  geom_point_rast(data = wnn_cd8_df %>%
+                    filter(grepl("CD8",predicted.id)),
+                  aes(x = atac_cd8,
+                      y = rna_cd8,
+                      color = adt_cd8))
+
+rna_atac_cd8 <- wnn_cd8_df %>%
+  filter(atac_cd8 > 0 & rna_cd8 > 0)
+
+rna_atac_fit <- lm(rna_cd8 ~ atac_cd8, rna_atac_cd8)
+```
+
+
+```{r}
+ggplot(wnn_cd8_df) +
+  geom_point_rast(aes(x = rna_cd8,
+                      y = adt_cd8,
+                      color = atac_cd8))
+```
+
+```{r}
+ggplot(wnn_cd8_df) +
+  geom_point_rast(aes(x = atac_cd8,
+                      y = adt_cd8,
+                      color = rna_cd8))
+```
+
+
+Weights barplot
+```{r fig.width = 1, fig.height = 5}
+wnn_meta <- so_wnn@meta.data
+wnn_meta$barcode <- rownames(wnn_meta)
+wnn_meta <- left_join(wnn_meta, type_anno)
+
+plot_df <- wnn_meta %>%
+  select(predicted.id,
+         ends_with(".weight"),
+         seurat_pbmc_type_id,
+         seurat_pbmc_type_color)
+
+plot_df <- plot_df %>%
+  arrange(predicted.id, RNA.weight) %>%
+  mutate(y = 1:n(),
+         rna_xmin = 0,
+         rna_xmax = RNA.weight,
+         atac_xmin = RNA.weight,
+         atac_xmax = RNA.weight + ATAC.weight,
+         adt_xmin = RNA.weight + ATAC.weight,
+         adt_xmax = 1)
+
+type_plot_df <- plot_df %>%
+  group_by(predicted.id) %>%
+  summarise(xmin = -0.2, xmax = -0.05,
+         ymin = min(y), ymax = max(y))
+
+ggplot() +
+  geom_rect(data = type_plot_df,
+            aes(xmin = xmin, xmax = xmax,
+                ymin = ymin - 0.5, ymax = ymax + 0.5,
+                fill = predicted.id)) +
+  geom_rect(data = plot_df,
+            aes(xmin = rna_xmin,
+                xmax = rna_xmax,
+                ymin = y - 0.5,
+                ymax = y + 0.5),
+            fill = "darkblue") +
+  geom_rect(data = plot_df,
+            aes(xmin = atac_xmin,
+                xmax = atac_xmax,
+                ymin = y - 0.5,
+                ymax = y + 0.5),
+            fill = "darkred") +
+  geom_rect(data = plot_df,
+            aes(xmin = adt_xmin,
+                xmax = adt_xmax,
+                ymin = y - 0.5,
+                ymax = y + 0.5),
+            fill = "darkgreen") +
+  scale_fill_varibow() +
+  scale_x_continuous("",expand = c(0,0)) +
+  scale_y_reverse("", expand = c(0,0)) +
+  theme(legend.position = "none",
+        axis.text = element_blank(),
+        axis.ticks = element_blank())
+```
+
+```{r fig.width = 7.5, fig.height = 2}
+plot_df2 <- plot_df %>%
+  mutate(xpos = seurat_pbmc_type_id,
+         rna_xpos = xpos,
+         atac_xpos = xpos - 0.3,
+         adt_xpos = xpos + 0.3)
+
+plot_xlab <- data.frame(
+  breaks = unique(c(plot_df2$adt_xpos,
+                    plot_df2$rna_xpos,
+                    plot_df2$atac_xpos))
+) %>%
+  mutate(labels = rep(c("P","R","A"), each = n() / 3))
+
+plot_sep <- data.frame(xpos = unique(plot_df2$xpos) + 0.5)
+plot_sep <- arrange(plot_sep, xpos)
+plot_sep <- plot_sep[-nrow(plot_sep),,drop = FALSE]
+
+weight_boxplots <- ggplot() +
+  geom_boxplot(data = plot_df2,
+              aes(x = xpos - 0.3,
+                  y = RNA.weight,
+                  fill = seurat_pbmc_type_color),
+              width = 0.25,
+                  outlier.size = 0.1) +
+  geom_boxplot(data = plot_df2,
+              aes(x = xpos,
+                  y = ATAC.weight,
+                  fill = seurat_pbmc_type_color),
+              width = 0.25,
+                  outlier.size = 0.1) +
+  geom_boxplot(data = plot_df2,
+              aes(x = xpos + 0.3,
+                  y = ADT.weight,
+                  fill = seurat_pbmc_type_color),
+              width = 0.25,
+                  outlier.size = 0.1) +
+  geom_vline(data = plot_sep,
+             aes(xintercept = xpos)) +
+  theme_bw() +
+  scale_fill_identity() +
+  scale_x_continuous("Modality (A, ATAC; R, RNA; P, Protein)",
+                     breaks = plot_xlab$breaks,
+                    labels = plot_xlab$labels,
+                    expand = c(0,0)) +
+  scale_y_continuous("Modality Weight") +
+  theme(legend.position = "none",
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank())
+
+weight_boxplots
+```
+
+
+
+```{r}
+ggsave("Figure_4D_weight_boxplots.pdf",
+       weight_boxplots,
+       width = 7.5,
+       height = 2)
+```
+
+### Marker dotplots
+```{r}
+library(scrattch.vis)
+adt_to_symbol <- read.csv("common/adt_to_symbol.csv")
+
+adt_to_symbol <- adt_to_symbol %>%
+  filter(gene_symbol %in% rownames(atac_gs_mat)) %>%
+  #Drop granulocyte marker CD66b - zero expression in RNA
+  filter(adt_name != "CD66b")
+```
+
+```{r}
+rna_plot_data <- so[["RNA"]][adt_to_symbol$gene_symbol,]
+rna_plot_data <- as.data.frame(t(rna_plot_data))
+names(rna_plot_data) <- adt_to_symbol$adt_name
+rna_plot_data <- cbind(sample_name = colnames(so[["RNA"]]),
+                       rna_plot_data)
+
+atac_plot_data <- atac_gs_mat[adt_to_symbol$gene_symbol,]
+atac_plot_data <- as.data.frame(t(atac_plot_data))
+names(atac_plot_data) <- adt_to_symbol$adt_name
+atac_plot_data <- cbind(sample_name = colnames(atac_gs_mat),
+                        atac_plot_data)
+atac_plot_data <- atac_plot_data %>%
+  filter(sample_name %in% rna_plot_data$sample_name)
+
+adt_plot_data <- adt_meta %>%
+  mutate(CD45 = pmax(CD45RA, CD45RO)) %>%
+  select(cell_barcode,one_of(adt_to_symbol$adt_name)) %>%
+  mutate(cell_barcode = paste0(cell_barcode,"-1")) %>%
+  filter(cell_barcode %in% rna_plot_data$sample_name)
+names(adt_plot_data) <- c("sample_name", adt_to_symbol$adt_name)
+```
+
+```{r}
+rna_plot_data$sample_name <- paste0(rna_plot_data$sample_name, "-RNA.UMIs")
+atac_plot_data$sample_name <- paste0(atac_plot_data$sample_name, "-ATAC.GeneScore")
+adt_plot_data$sample_name <- paste0(adt_plot_data$sample_name, "-ADT.UMIs")
+
+all_plot_data <- do.call(rbind, list(rna_plot_data, atac_plot_data, adt_plot_data))
+names(all_plot_data) <- gsub("-",".",names(all_plot_data))
+```
+
+```{r}
+modality_anno <- data.frame(modality_id = 1:3,
+                            modality_label = c("ATAC.GeneScore","RNA.UMIs","ADT.UMIs"),
+                            modality_color = c("#000000","#808080","#FFFFFF"))
+
+plot_anno <- map_dfr(c("RNA.UMIs","ATAC.GeneScore","ADT.UMIs"),
+                     function(modality) {
+                       wnn_meta %>%
+                         dplyr::rename(seurat_pbmc_type_label = predicted.id) %>%
+                         select(barcode,
+                                starts_with("seurat_pbmc_type")) %>%
+                         dplyr::rename(sample_name = barcode) %>%
+                         mutate(sample_name = paste0(sample_name, "-", modality)) %>%
+                         mutate(modality_label = modality) %>%
+                         left_join(modality_anno)
+                     })
+
+plot_anno <- plot_anno %>%
+  arrange(seurat_pbmc_type_id, modality_id)
+```
+
+```{r fig.width = 11, fig.height = 11}
+plot_genes <- gsub("-",".", adt_to_symbol$adt_name)
+dp1 <- group_split_dot_plot(
+  data = all_plot_data,
+  anno = plot_anno,
+  genes = plot_genes[1:20],
+  grouping = "seurat_pbmc_type",
+  split_by = "modality",
+  normalize_rows = TRUE,
+  show_counts = TRUE,
+  rotate_counts = FALSE,
+  fill_stat = "median",
+  log_scale = TRUE,
+  label_height = 10,
+  max_width = 20
+)
+dp2 <- group_split_dot_plot(
+  data = all_plot_data,
+  anno = plot_anno,
+  genes = plot_genes[21:length(plot_genes)],
+  grouping = "seurat_pbmc_type",
+  split_by = "modality",
+  normalize_rows = TRUE,
+  show_counts = TRUE,
+  rotate_counts = FALSE,
+  fill_stat = "median",
+  log_scale = TRUE,
+  label_height = 10,
+  max_width = 20
+)
+dp_grid <- plot_grid(dp1, dp2, ncol = 2)
+dp_grid
+```
+
+```{r}
+ggsave("Fig4_Supplement_Dotplot.pdf",
+       dp_grid,
+       width = 11,
+       height = 11,
+       useDingbats = FALSE)
+```
+
+## Cell Type QC Metrics
+```{r}
+qc_meta <- wnn_meta %>%
+  left_join(arc_meta)
+```
+```{r fig.width = 3.75, fig.height = 2}
+rna_umi_q <- qc_meta %>%
+  group_by(seurat_pbmc_type_id) %>%
+  summarise(q25 = quantile(nCount_RNA, 0.25),
+         q50 = quantile(nCount_RNA, 0.50),
+         q75 = quantile(nCount_RNA, 0.75))
+
+rna_umi_violins <- ggplot() +
+  geom_quasirandom(data = qc_meta,
+                   aes(x = seurat_pbmc_type_id,
+                       y = log10(nCount_RNA + 1),
+                       color = seurat_pbmc_type_color),
+                   size = 0.1) +
+  geom_errorbar(data = rna_umi_q,
+                aes(x = seurat_pbmc_type_id,
+                    ymin = log10(q25+1),
+                    ymax = log10(q75+1)),
+                width = 0.4,
+                size = 0.2) +
+  geom_segment(data = rna_umi_q,
+               aes(x = seurat_pbmc_type_id - 0.3,
+                   xend = seurat_pbmc_type_id + 0.3,
+                   y = log10(q50+1),
+                   yend = log10(q50+1)),
+               size = 0.5) +
+  geom_text(data = rna_umi_q,
+            aes(x = seurat_pbmc_type_id,
+                y = 2,
+                label = q50),
+            size = 3,
+            angle = 90,
+            hjust = 0) +
+  scale_color_identity() +
+  scale_x_continuous("Cell Type",
+                     breaks = type_anno$seurat_pbmc_type_id,
+                     labels = type_anno$predicted.id) +
+  scale_y_continuous("Log10(RNA UMIs + 1)",
+                     limits = c(2,4.5)) +
+  theme_bw(base_size = 7) + 
+  theme(axis.ticks = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_blank())  +
+  ggtitle("RNA: UMIs per Cell")
+
+rna_umi_violins
+```
+
+```{r fig.width = 3.75, fig.height = 2}
+rna_gene_q <- qc_meta %>%
+  group_by(seurat_pbmc_type_id) %>%
+  summarise(q25 = quantile(nFeature_RNA, 0.25),
+         q50 = quantile(nFeature_RNA, 0.50),
+         q75 = quantile(nFeature_RNA, 0.75))
+
+rna_gene_violins <- ggplot() +
+  geom_quasirandom(data = qc_meta,
+                   aes(x = seurat_pbmc_type_id,
+                       y = log10(nFeature_RNA + 1),
+                       color = seurat_pbmc_type_color),
+                   size = 0.1) +
+  geom_errorbar(data = rna_gene_q,
+                aes(x = seurat_pbmc_type_id,
+                    ymin = log10(q25+1),
+                    ymax = log10(q75+1)),
+                width = 0.4,
+                size = 0.2) +
+  geom_segment(data = rna_gene_q,
+               aes(x = seurat_pbmc_type_id - 0.3,
+                   xend = seurat_pbmc_type_id + 0.3,
+                   y = log10(q50+1),
+                   yend = log10(q50+1)),
+               size = 0.5) +
+  geom_text(data = rna_gene_q,
+            aes(x = seurat_pbmc_type_id,
+                y = 2,
+                label = q50),
+            size = 3,
+            angle = 90,
+            hjust = 0) +
+  scale_color_identity() +
+  scale_x_continuous("Cell Type",
+                     breaks = type_anno$seurat_pbmc_type_id,
+                     labels = type_anno$predicted.id) +
+  scale_y_continuous("Log10(RNA Genes Detected + 1)",
+                     limits = c(2,4.5)) +
+  theme_bw(base_size = 7) + 
+  theme(axis.ticks = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_blank()) +
+  ggtitle("RNA: Genes Detected per Cell")
+
+rna_gene_violins
+```
+
+```{r fig.width = 3.75, fig.height = 2}
+rna_exon_q <- qc_meta %>%
+  group_by(seurat_pbmc_type_id) %>%
+  summarise(q25 = quantile(gex_exonic_umis / gex_umis_count, 0.25),
+         q50 = quantile(gex_exonic_umis / gex_umis_count, 0.50),
+         q75 = quantile(gex_exonic_umis / gex_umis_count, 0.75))
+
+rna_exon_violins <- ggplot() +
+  geom_quasirandom(data = qc_meta,
+                   aes(x = seurat_pbmc_type_id,
+                       y = gex_exonic_umis / gex_umis_count,
+                       color = seurat_pbmc_type_color),
+                   size = 0.1) +
+  geom_errorbar(data = rna_exon_q,
+                aes(x = seurat_pbmc_type_id,
+                    ymin = q25,
+                    ymax = q75),
+                width = 0.4,
+                size = 0.2) +
+  geom_segment(data = rna_exon_q,
+               aes(x = seurat_pbmc_type_id - 0.3,
+                   xend = seurat_pbmc_type_id + 0.3,
+                   y = q50,
+                   yend = q50),
+               size = 0.5) +
+  geom_text(data = rna_exon_q,
+            aes(x = seurat_pbmc_type_id,
+                y = 0,
+                label = sprintf("%.3f",q50)),
+            size = 3,
+            angle = 90,
+            hjust = 0) +
+  scale_color_identity() +
+  scale_x_continuous("Cell Type",
+                     breaks = type_anno$seurat_pbmc_type_id,
+                     labels = type_anno$predicted.id) +
+  scale_y_continuous("Fraction Exonic RNA UMIs",
+                     limits = c(0,1)) +
+  theme_bw(base_size = 7) + 
+  theme(axis.ticks = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_blank()) +
+  ggtitle("RNA: Fraction of UMIs in Exons")
+
+rna_exon_violins
+```
+
+```{r fig.width = 3.75, fig.height = 2}
+adt_umi_q <- qc_meta %>%
+  group_by(seurat_pbmc_type_id) %>%
+  summarise(q25 = quantile(adt_umis, 0.25),
+         q50 = quantile(adt_umis, 0.50),
+         q75 = quantile(adt_umis, 0.75))
+
+adt_umi_violins <- ggplot() +
+  geom_quasirandom(data = qc_meta,
+                   aes(x = seurat_pbmc_type_id,
+                       y = log10(adt_umis + 1),
+                       color = seurat_pbmc_type_color),
+                   size = 0.1) +
+  geom_errorbar(data = adt_umi_q,
+                aes(x = seurat_pbmc_type_id,
+                    ymin = log10(q25+1),
+                    ymax = log10(q75+1)),
+                width = 0.4,
+                size = 0.2) +
+  geom_segment(data = adt_umi_q,
+               aes(x = seurat_pbmc_type_id - 0.3,
+                   xend = seurat_pbmc_type_id + 0.3,
+                   y = log10(q50+1),
+                   yend = log10(q50+1)),
+               size = 0.5) +
+  geom_text(data = adt_umi_q,
+            aes(x = seurat_pbmc_type_id,
+                y = 2,
+                label = q50),
+            size = 3,
+            angle = 90,
+            hjust = 0) +
+  scale_color_identity() +
+  scale_x_continuous("Cell Type",
+                     breaks = type_anno$seurat_pbmc_type_id,
+                     labels = type_anno$predicted.id) +
+  scale_y_continuous("Log10(ADT UMIs + 1)",
+                     limits = c(2,4.5)) +
+  theme_bw(base_size = 7) + 
+  theme(axis.ticks = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_blank()) +
+  ggtitle("Protein: ADT UMIs per Cell")
+
+adt_umi_violins
+```
+
+```{r fig.width = 3.75, fig.height = 2}
+atac_frag_q <- qc_meta %>%
+  group_by(seurat_pbmc_type_id) %>%
+  summarise(q25 = quantile(atac_fragments, 0.25),
+         q50 = quantile(atac_fragments, 0.50),
+         q75 = quantile(atac_fragments, 0.75))
+
+atac_frag_violins <- ggplot() +
+  geom_quasirandom(data = qc_meta,
+                   aes(x = seurat_pbmc_type_id,
+                       y = log10(atac_fragments + 1),
+                       color = seurat_pbmc_type_color),
+                   size = 0.1) +
+  geom_errorbar(data = atac_frag_q,
+                aes(x = seurat_pbmc_type_id,
+                    ymin = log10(q25+1),
+                    ymax = log10(q75+1)),
+                width = 0.4,
+                size = 0.2) +
+  geom_segment(data = atac_frag_q,
+               aes(x = seurat_pbmc_type_id - 0.3,
+                   xend = seurat_pbmc_type_id + 0.3,
+                   y = log10(q50+1),
+                   yend = log10(q50+1)),
+               size = 0.5) +
+  geom_text(data = atac_frag_q,
+            aes(x = seurat_pbmc_type_id,
+                y = 2.75,
+                label = sprintf("%.1f", q50)),
+            size = 3,
+            angle = 90,
+            hjust = 1) +
+  scale_color_identity() +
+  scale_x_continuous("Cell Type",
+                     breaks = type_anno$seurat_pbmc_type_id,
+                     labels = type_anno$predicted.id) +
+  scale_y_continuous("Log10(Unique ATAC Fragments + 1)",
+                     limits = c(2,5)) +
+  theme_bw(base_size = 7) + 
+  theme(axis.ticks = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_blank()) +
+  ggtitle("ATAC: Unique Fragments per Cell")
+
+atac_frag_violins
+```
+
+```{r fig.width = 3.75, fig.height = 2}
+atac_mito_q <- qc_meta %>%
+  group_by(seurat_pbmc_type_id) %>%
+  summarise(q25 = quantile(atac_mitochondrial_reads / atac_raw_reads, 0.25),
+         q50 = quantile(atac_mitochondrial_reads / atac_raw_reads, 0.50),
+         q75 = quantile(atac_mitochondrial_reads / atac_raw_reads, 0.75))
+
+atac_mito_violins <- ggplot() +
+  geom_quasirandom(data = qc_meta,
+                   aes(x = seurat_pbmc_type_id,
+                       y = atac_mitochondrial_reads / atac_raw_reads,
+                       color = seurat_pbmc_type_color),
+                   size = 0.1) +
+  geom_errorbar(data = atac_mito_q,
+                aes(x = seurat_pbmc_type_id,
+                    ymin = q25,
+                    ymax = q75),
+                width = 0.4,
+                size = 0.2) +
+  geom_segment(data = atac_mito_q,
+               aes(x = seurat_pbmc_type_id - 0.3,
+                   xend = seurat_pbmc_type_id + 0.3,
+                   y = q50,
+                   yend = q50),
+               size = 0.5) +
+  geom_text(data = atac_mito_q,
+            aes(x = seurat_pbmc_type_id,
+                y = 0.075,
+                label = sprintf("%.4f",q50)),
+            size = 3,
+            angle = 90,
+            hjust = 0) +
+  scale_color_identity() +
+  scale_x_continuous("Cell Type",
+                     breaks = type_anno$seurat_pbmc_type_id,
+                     labels = type_anno$predicted.id) +
+  scale_y_continuous("Fraction Mitochondrial ATAC Reads",
+                     limits = c(0,0.1)) +
+  theme_bw(base_size = 7) + 
+  theme(axis.ticks = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_blank()) +
+  ggtitle("ATAC: Fraction of Reads in Mitochondria")
+
+atac_mito_violins
+```
+
+```{r fig.width = 7.5, fig.height = 6}
+qc_violin_grid <- plot_grid(atac_frag_violins, atac_mito_violins,
+          rna_umi_violins, rna_gene_violins,
+          rna_exon_violins, adt_umi_violins,
+          ncol = 2)
+qc_violin_grid
+```
+
+```{r}
+ggsave("Fig4_Supplement_qc_violins.pdf",
+       qc_violin_grid,
+       width = 7.5,
+       height = 6,
+       useDingbats = FALSE)
+```
+
+
+```{r}
+sessionInfo()
+```
+

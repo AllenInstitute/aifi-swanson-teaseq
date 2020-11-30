@@ -1,0 +1,1401 @@
+---
+title: "10x Genomics scATAC-seq QC"
+author: 
+ - Lucas Graybuck
+date: "`r format(Sys.time(), '%Y-%m-%d')`"
+output:
+  html_document:
+    code_folding: hide
+    df_print: paged
+    self_contained: true
+params:
+  in_pre: NULL
+  in_tenx: NULL
+  in_key: NULL
+  in_well: NULL
+  genome: NULL
+  refs: NULL
+  window_sizes: NULL
+  out_dir: NULL
+---
+
+<a id="contents"></a>
+
+## Contents
+
+#### [Data Processing](#data_processing)
+- [Session Preparation](#session_preparation)
+- [Load References](#load_refs)
+- [Assemble Metadata](#assemble_meta)
+- [ArchR QC Analysis](#archr)
+- [Output metadata](#meta_out)
+- [Generate Matrices](#mats)
+
+#### [QC Metrics](#qc_stats)
+- [Cell Barcode QC](#barcode_stats)
+- [Fragment Metrics](#fragment_stats)
+- [Saturation Metrics](#saturation_stats)
+- [10x Genomics Metrics](#tenx_stats)
+
+#### [QC Plots](#qc_plots)
+- [UMI Saturation Plot](#saturation_plot)
+- [Signal Saturation Plot](#signal_plot)
+- [Fragment Width Plot](#width_plot)
+- [All Cell Histograms](#all_hist_plot)
+- [Reads vs altius_frac Plot](#reads_altius_frac_plot)
+- [Reads vs peaks_frac Plot](#reads_peaks_frac_plot)
+- [peaks_frac vs tss_frac Plot](#peaks_frac_tss_frac_plot)
+- [RIP vs RITSS Plot](#rip_ritss_plot)
+- [Filtered Histograms](#filtered_hist_plot)
+
+[Write QC JSON](#json_out)
+
+#### [Session Info](#session_info)
+
+<a id="data_processing"></a>
+
+## Data Processing
+
+<a id="session_preparation"></a>
+
+### Session Preparation
+
+#### Load libraries:
+```{r Load Libraries}
+start_time <- Sys.time()
+
+quiet_library <- function(...) {
+  suppressPackageStartupMessages(library(...))
+}
+quiet_library(ATAComb)
+quiet_library(H5weaver)
+quiet_library(Matrix)
+quiet_library(S4Vectors)
+quiet_library(ggplot2)
+quiet_library(cowplot)
+quiet_library(jsonlite)
+quiet_library(purrr)
+options(stringsAsFactors = FALSE)
+```
+
+Declaring start
+```{r Declare start}
+stm("Starting scATAC-seq preprocessing")
+```
+
+#### Argument parsing
+```{r Parse arguments}
+if(is.null(params$in_pre)) {
+  in_pre <- system.file("testdata/preprocessed", package = "ATAComb")
+  in_tenx <- system.file("testdata/outs", package = "ATAComb")
+  in_sum <- system.file("testdata/outs", package = "ATAComb")
+  in_key <- system.file("testdata/test_SampleSheet.csv", package = "ATAComb")
+  in_well <- "B000-AP0C1W1"
+  genome <- "hg38"
+  refs <- "all"
+  window_sizes <- "all"
+  out_dir <- tempdir()
+} else {
+  in_pre <- params$in_pre
+  in_tenx <- params$in_tenx
+  in_key <- params$in_key
+  in_well <- params$in_well
+  genome <- params$genome
+  refs <- params$refs
+  window_sizes <- params$window_sizes
+  out_dir <- params$out_dir
+}
+
+in_well <- sub("-[AHR]?P","-AP",in_well)
+in_batch <- sub("-.+","",in_well)
+
+# Check Well ID format
+if(!grepl("^[A-Z][0-9]{3}-AP[0-9]C[0-9]W[0-9]$", in_well)) {
+  stm(paste0("ERROR: Input Well ID is not in expected format, e.g. B###-AP#C#W# :", in_h5))
+  stop()
+}
+
+# Check Genome
+if(!genome %in% c("hg38","hg19")) {
+  stm(paste0("Genome must be 'hg38' or 'hg19'. Genome provided: ", genome))
+  stop()
+}
+
+if(is.null(refs)) {
+  refs <- "all"
+}
+
+if(is.null(window_sizes)) {
+  window_sizes <- "all"
+}
+
+stm(paste0("IN  preprocessed dir : ", in_pre))
+stm(paste0("IN  10x outputs      : ", in_tenx))
+stm(paste0("IN  SampleSheet      : ", in_key))
+stm(paste0("IN  Well ID          : ", in_well))
+stm(paste0("IN  Genome           : ", genome))
+stm(paste0("IN  References       : ", refs))
+stm(paste0("IN  Window Sizes     : ", window_sizes))
+stm(paste0("OUT Directory        : ", out_dir))
+```
+
+#### Input Parameters
+```{r Print Arguments}
+print(c(
+  paste0("IN  preprocessed dir : ", in_pre),
+  paste0("IN  10x outputs      : ", in_tenx),
+  paste0("IN  SampleSheet      : ", in_key),
+  paste0("IN  Well ID          : ", in_well),
+  paste0("IN  Genome           : ", genome),
+  paste0("IN  References       : ", refs),
+  paste0("IN  Window Sizes     : ", window_sizes),
+  paste0("OUT H5 directory     : ", out_dir)
+))
+```
+
+#### Set ArchR parameters
+```{r setup archr}
+quiet_library(ArchR)
+
+stm("Setting ArchR parameters")
+set.seed(3030)
+
+available_cores <- parallel::detectCores()
+stm(paste0("Using ",available_cores, " threads"))
+
+addArchRThreads(available_cores, force = TRUE)
+addArchRGenome(genome)
+```
+
+#### Check Input Files
+```{r Check Inputs}
+if(!dir.exists(in_pre)) {
+  stm(paste0("ERROR: Cannot find IN preprocessed dir:", in_pre))
+  stop()
+}
+if(!dir.exists(in_tenx)) {
+  stm(paste0("ERROR: Cannot find IN 10x outputs:", in_tenx))
+  stop()
+} else {
+  in_pbm <- file.path(in_tenx, "per_barcode_metrics.csv")
+  if(!file.exists(in_pbm)) {
+    stm(paste0("ERROR: Cannot find 10x per_barcode_metrics.csv:", in_pbm))
+    stop()
+  }
+  
+  in_sum <- file.path(in_tenx, "summary.csv")
+  if(!file.exists(in_sum)) {
+    stm(paste0("WARNING: Cannot find IN summary.csv:", in_sum))
+    stm("WARNING: Some QC metrics will not be calculated")
+  }
+  
+  in_frag <- file.path(in_tenx, "atac_fragments.tsv.gz")
+  if(!file.exists(in_frag)) {
+    stm(paste0("ERROR: Cannot find 10x atac_fragments.tsv.gz:", in_tenx))
+    stop()
+  }
+}
+
+if(!file.exists(in_key)) {
+  stm(paste0("ERROR: Cannot find IN SampleSheet file:", in_key))
+  stop()
+}
+in_prefix <- file.path(in_pre, in_well)
+```
+
+#### Check reference overlap files
+```{r}
+reference_files <- list.files(system.file("reference", package = "ATAComb"), 
+                              pattern = paste0(genome, ".+gr.rds"),
+                              full.names = TRUE)
+reference_names <- sub(paste0(".+",genome,"_"),"",reference_files)
+reference_names <- sub("_gr.rds","",reference_names)
+
+stm(paste(c("Available references:", reference_names), collapse = " "))
+
+feature_mat_files <- list.files(in_pre, pattern = "sparse_matrix.tsv.gz", full.names = TRUE)
+feature_mat_names <- sub(paste0(in_prefix,"_"), "", feature_mat_files)
+feature_mat_names <- sub("_sparse_matrix.tsv.gz","",feature_mat_names)
+stm(paste(c("Available reference matrices:", feature_mat_names), collapse = " "))
+
+matching_refs <- intersect(reference_names, feature_mat_names)
+stm(paste(c("Preprocessed reference data:", matching_refs), collapse = " "))
+
+if(length(matching_refs) == 0) {
+  stop("Preprocessed reference datasets do not match available references")
+} else {
+  reference_files <- reference_files[match(matching_refs, reference_names)]
+  reference_names <- matching_refs
+  feature_mat_files <- feature_mat_files[match(matching_refs, feature_mat_names)]
+  feature_mat_names <- matching_refs
+}
+
+if(refs == "all") {
+  stm("Using all matching references")
+} else {
+  split_refs <- unlist(strsplit(refs, split = ","))
+  
+  # Check for matching references
+  good_refs <- intersect(split_refs, reference_names)
+  
+  # Stop if no matches
+  if(length(good_refs) == 0) {
+    stop(paste("No references match", refs))
+  }
+  
+  combined_good_refs <- paste(good_refs, collapse = " ")
+  stm(paste0("Selected references: ", combined_good_refs))
+  
+  reference_files <- reference_files[match(good_refs, reference_names)]
+  reference_names <- good_refs
+
+  feature_mat_files <- feature_mat_files[match(good_refs, feature_mat_names)]
+  feature_mat_names <- good_refs
+
+  # Warn about mismatches
+  bad_refs <- setdiff(split_refs, reference_names)
+  if(length(bad_refs) > 0) {
+    bad_refs <- paste(bad_refs, collapse = ",")
+    stm(paste0("WARNING: Reference input(s) ",bad_refs," do not match available references. Skipping."))
+  }
+}
+```
+
+#### Check window sizes
+```{r}
+window_mat_files <- list.files(in_pre, pattern = "window.+counts.tsv.gz", full.names = TRUE)
+window_mat_names <- sub(paste0(in_prefix,"_"), "", window_mat_files)
+window_mat_names <- sub("_counts.tsv.gz","",window_mat_names)
+stm(paste(c("Available window matrices:", window_mat_names), collapse = " "))
+
+if(window_sizes[1] == "all") {
+  stm("Using all Available window matrices")
+  use_windows <- window_mat_names
+} else {
+  split_windows <- unlist(strsplit(window_sizes, split = ","))
+
+  # Check for matching references
+  good_windows <- intersect(split_windows, window_mat_names)
+  
+  # Stop if no matches
+  if(length(good_refs) == 0) {
+    stop(paste("No window matrices match", window_sizes))
+  }
+  
+  combined_good_windows <- paste(good_windows, collapse = " ")
+  stm(paste0("Selected window matrices: ", good_windows))
+  
+  window_mat_names <- good_windows
+  window_mat_files <- window_mat_files[match(good_windows, window_mat_names)]
+  
+  # Warn about mismatches
+  bad_windows <- setdiff(split_windows, window_mat_names)
+  if(length(bad_windows) > 0) {
+    bad_windows <- paste(bad_windows, collapse = ",")
+    stm(paste0("WARNING: Window input(s) ",bad_windows," do not match available matrices. Skipping."))
+  }
+}
+```
+
+#### Create out directory if missing
+```{r Create Out Dir}
+if(!dir.exists(out_dir)) {
+  stm(paste0("Creating Output Directory: ",out_dir))
+  dir.create(out_dir, 
+             recursive = TRUE)
+}
+```
+
+#### Declare QC Cutoffs
+```{r}
+cutoffs <- list(altius_frac = 0.5,
+                tss_frac = 0.2,
+                peaks_frac = 0.2)
+
+stm("Using QC Cutoffs:")
+walk(seq_along(cutoffs),
+     function(x) {
+       stm(paste("QC",names(cutoffs)[x],": >", cutoffs[[x]]))
+     })
+```
+
+```{r}
+print("Using QC Cutoffs:")
+walk(seq_along(cutoffs),
+     function(x) {
+       print(paste("QC",names(cutoffs)[x],": >", cutoffs[[x]]))
+     })
+```
+
+[Return to Contents](#contents)
+
+<a id="load_refs"></a>
+
+#### Load Reference Datasets
+```{r Load references}
+stm(paste("Loading reference region sets for", genome))
+
+reference_datasets <- map(reference_files,
+                          readRDS)
+
+gr_to_df <- function(gr) {
+  df <- data.frame(seqnames = seqnames(gr),
+                   start = start(gr),
+                   end = end(gr),
+                   strand = strand(gr))
+  
+  mc <- as.data.frame(mcols(gr)@listData)
+  
+  if(nrow(mc) == nrow(df)) {
+    cbind(df, mc)
+  } else {
+    df
+  }
+  
+}
+
+reference_datasets <- map(reference_datasets, gr_to_df)
+
+names(reference_datasets) <- reference_names
+
+reference_meta <- map(seq_along(reference_datasets),
+                      function(x) {
+                        dt <- reference_datasets[[x]]
+                        reference_name = reference_names[x]
+                        meta <- data.frame(name = paste0(dt$seqnames, "_", dt$start, "_", dt$end),
+                                           id = paste0(genome, "_", reference_name, "_", 1:nrow(dt)))
+                        if(ncol(dt) > 5) {
+                          meta <- cbind(meta, dt[6:ncol(dt)])
+                        }
+                        
+                        as.list(meta)
+                      })
+
+names(reference_meta) <- reference_names
+```
+
+#### Load SampleSheet
+```{r Load SampleSheet}
+stm(paste0("Reading SampleSheet from ", in_key))
+
+samplesheet <- read.csv(in_key)
+
+in_sample <- as.character(samplesheet$SampleID[samplesheet$WellID == in_well])
+
+stm(paste0("SampleSheet WellID: ", in_well, "; SampleID: ", in_sample))
+
+out_prefix <- file.path(out_dir, paste0(in_batch, "_", in_sample, "_"))
+```
+
+
+[Return to Contents](#contents)
+
+<a id="assemble_meta"></a>
+
+### Generate Metadata
+
+#### Read metadata sources
+```{r}
+stm(paste0("Reading 10x metadata from ", in_pbm))
+
+if(grepl("per_barcode_metrics.csv", in_pbm)) {
+  tenx_meta <- fread(in_pbm)
+  tenx_meta <- tenx_meta[, list(barcode, atac_raw_reads, atac_dup_reads, atac_mitochondrial_reads, atac_fragments)]
+  names(tenx_meta) <- c("original_barcodes","n_fragments","n_duplicate","n_mito","n_unique")
+} else if(grepl("barcode_counts.tsv", in_pbm)) {
+  stm("Using barcode_counts.tsv")
+  tenx_meta <- fread(in_pbm)
+  names(tenx_meta) <- c("original_barcodes", "n_fragments")
+  tenx_meta$n_unique <- tenx_meta$n_fragments
+}
+
+stm(paste0("Reading reference counts from ", in_pre))
+
+ref_count_files <- list.files(in_pre, pattern = "total_counts.tsv.gz", full.names = TRUE)
+ref_count_names <- sub(paste0(in_prefix,"_"), "", ref_count_files)
+ref_count_names <- sub("_total_counts.tsv.gz","",ref_count_names)
+
+ref_counts <- map(seq_along(ref_count_files),
+                  function(x) {
+                    fread(ref_count_files[x],
+                          header = FALSE,
+                          col.names = c("original_barcodes",
+                                        paste0(ref_count_names[x], "_count")))
+                  })
+
+meta <- tenx_meta
+for(i in seq_along(ref_counts)) {
+  meta <- meta[ref_counts[[i]], on = "original_barcodes"]
+  count_name <- paste0(ref_count_names[i], "_count")
+  frac_name <- paste0(ref_count_names[i], "_frac")
+  meta[[frac_name]] <- meta[[count_name]] / meta$n_unique
+}
+```
+
+#### Generate cell IDs
+```{r Generate IDs}
+stm("Generating Cell IDs")
+
+meta$barcodes <- ids::uuid(nrow(meta),
+                           drop_hyphens = TRUE, 
+                           use_time = TRUE)
+meta$cell_name <- ids::adjective_animal(nrow(meta),
+                                        n_adjectives = 2,
+                                        max_len = 10)
+```
+
+#### Add Well/Chip/Pool/Sample IDs
+```{r}
+stm("Adding Batch and Sample ID metadata")
+meta$well_id <- in_well
+meta$chip_id <- sub("W[0-9]+$","",meta$well_id)
+meta$batch_id <- sub("-.+","",meta$chip_id)
+meta$pbmc_sample_id <- in_sample
+```
+
+#### Filter metadata based on cutoffs
+```{r}
+stm("Filtering based on QC cutoffs")
+stm(paste("Before filtering:",nrow(meta),"barcodes"))
+filtered_meta <- meta
+for(i in seq_along(cutoffs)) {
+  cut_name <- names(cutoffs)[i]
+  cut_val <- cutoffs[[i]]
+  filtered_meta <- filtered_meta[filtered_meta[[cut_name]] > cut_val]
+}
+stm(paste("After filtering:",nrow(filtered_meta),"barcodes"))
+```
+
+[Return to Contents](#contents)
+
+<a id="archr"></a>
+
+### ArchR QC analysis
+
+#### Create Arrow file
+```{r}
+stm(paste0("ArchR: Building ArrowFile from ",in_frag))
+valid_barcodes <- list(bcs = filtered_meta$original_barcodes)
+names(valid_barcodes) <- in_sample
+valid_barcodes <- SimpleList(valid_barcodes)
+
+ArrowFile <- createArrowFiles(inputFiles = in_frag,
+                              sampleNames = in_sample,
+                              outputNames = in_sample,
+                              validBarcodes = valid_barcodes,
+                              filterFrags = 500,
+                              filterTSS = 0,
+                              maxFrags = 1e6,
+                              force = TRUE)
+
+stm(paste0("ArchR: ArrowFile generated at ", ArrowFile))
+
+```
+
+#### Score and filter doublets
+```{r}
+stm("ArchR: Scoring and filtering doublets")
+doublet_scores <- addDoubletScores(input = ArrowFile,
+                                   force = TRUE)
+
+proj <- ArchRProject(ArrowFiles = ArrowFile,
+                     copyArrows = TRUE)
+
+proj_ArrowFile <- getArrowFiles(proj)
+stm(paste0("ArchR: Project ArrowFile located at ", proj_ArrowFile))
+```
+
+```{r}
+# Store unfiltered names for later
+unfiltered_archr_names <- getCellNames(proj)
+
+# Check for doublet scoring
+# This will be FALSE in the case of small test datasets
+if(min(doublet_scores[[1]]$doubletEnrich) < 1) {
+  # Remove doublets
+  proj <- filterDoublets(proj)
+  
+  # Get filtered names and original barcodes
+  archr_meta <- getCellColData(proj)
+  filtered_archr_names <- rownames(archr_meta)
+  filtered_archr_barcodes <- sub(".+#","",filtered_archr_names)
+  archr_meta <- archr_meta[filtered_archr_names,]
+  
+  filter_doublets <- TRUE
+} else {
+  stm("WARNING: DOUBLET SCORING FAILED - retaining all cells.")
+  
+  # Don't filter names and original barcodes
+  archr_meta <- getCellColData(proj)
+  filtered_archr_names <- rownames(archr_meta)
+  filtered_archr_barcodes <- sub(".+#","",filtered_archr_names)
+  archr_meta <- archr_meta[filtered_archr_names,]
+  
+  filter_doublets <- FALSE
+}
+
+
+# Filter metadata to match
+# Get counts for reporting
+n_pre_doublet_filter <- nrow(filtered_meta)
+
+stm(paste0("ArchR: Total barcodes = ",n_pre_doublet_filter))
+
+meta <- meta %>%
+  dplyr::mutate(singlet = original_barcodes %in% filtered_archr_barcodes)
+
+filtered_meta <- filtered_meta %>%
+  dplyr::filter(original_barcodes %in% filtered_archr_barcodes)
+
+n_post_doublet_filter <- nrow(filtered_meta)
+stm(paste0("ArchR: Singlet barcodes = ",n_post_doublet_filter))
+
+n_doublets <-  n_pre_doublet_filter - n_post_doublet_filter
+stm(paste0("ArchR: Doublet barcodes = ",n_doublets))
+
+# Match order to archr file
+filtered_meta <- filtered_meta[match(filtered_meta$original_barcodes, filtered_archr_barcodes),]
+
+# Add additional ArchR metadata to filtered_meta
+filtered_meta$DoubletScore <- archr_meta[["DoubletScore"]]
+filtered_meta$DoubletEnrichment <- archr_meta[["DoubletEnrichment"]]
+filtered_meta$TSSEnrichment <- archr_meta[["TSSEnrichment"]]
+```
+
+#### Save Archr project and shift arrow to output directory
+```{r}
+if(filter_doublets) {
+  stm("ArchR: Subsetting to remove doublets")
+  proj <- subsetArchRProject(proj,
+                             cells = filtered_archr_names)
+}
+
+ArrowFile <- getArrowFiles(proj)
+
+out_arrow <- paste0(out_prefix, "archr.arrow")
+
+stm(paste0("Saving .arrow to ", out_arrow))
+file.copy(ArrowFile, out_arrow)
+```
+
+Resolve metadata discrepencies
+```{r}
+stm("Resolving metadata discrepencies")
+proj_meta <- getCellColData(proj)
+h5_ls <- h5ls(out_arrow)
+
+h5_MetaNames <- h5_ls[h5_ls$group == "/Metadata",]
+h5_MetaNames <- h5_MetaNames[h5_MetaNames$dim != 1,]
+h5_MetaNames <- h5_MetaNames[h5_MetaNames$dim != length(filtered_archr_names),]
+
+if(nrow(h5_MetaNames) > 0) {
+  h5_CellNames <- h5read(out_arrow, "/Metadata/CellNames")
+  h5_keepLogic <- h5_CellNames %in% filtered_archr_barcodes
+  
+  for(i in 1:nrow(h5_MetaNames)) {
+    target <- h5_MetaNames$full_name[i]
+    h5_MetaVals <- h5read(out_arrow, target)
+    h5_MetaVals <- h5_MetaVals[h5_keepLogic]
+    h5delete(out_arrow, target)
+    h5write(h5_MetaVals, out_arrow, target)
+  }
+}
+
+# Add missing metadata
+additional_meta <- setdiff(names(filtered_meta), h5_MetaNames$name)
+if(length(additional_meta) > 0) {
+  for(meta_col in additional_meta) {
+    h5write(filtered_meta[[meta_col]],
+            out_arrow,
+            paste0("/Metadata/",meta_col))
+  }
+}
+```
+
+#### Clean up ArchR in memory
+```{r}
+rm(proj)
+```
+
+
+[Return to Contents](#contents)
+
+<a id="write_meta"></a>
+
+#### Write unfiltered and filtered metadata
+```{r}
+meta_out <- paste0(out_prefix, "all_metadata.csv.gz")
+stm(paste("Writing unfiltered metadata to", meta_out))
+fwrite(meta, meta_out)
+
+filtered_meta_out <- paste0(out_prefix, "filtered_metadata.csv.gz")
+stm(paste("Writing filtered metadata to", filtered_meta_out))
+fwrite(filtered_meta, filtered_meta_out)
+```
+
+[Return to Contents](#contents)
+
+<a id="mats"></a>
+
+## Build Feature Matrices
+
+#### Read overlaps and output results
+```{r Region Matrices}
+stm("Building reference matrices")
+
+obs_list <- as.list(filtered_meta[,names(filtered_meta) != "barcodes"])
+
+walk(seq_along(feature_mat_files),
+     function(x) {
+       mat_file <- feature_mat_files[x]
+       mat_name <- feature_mat_names[x]
+       
+       n_features <- nrow(reference_datasets[[mat_name]])
+       
+       stm(paste("Building",mat_name,"matrix"))
+       
+       dt <- fread(mat_file,
+                   header = FALSE,
+                   col.names = c("original_barcodes",
+                                 "i",
+                                 "x"),
+                   colClasses = list("character" = 1,
+                                     "integer" = c(2,3)))
+       
+       dt <- dt[original_barcodes %in% filtered_meta$original_barcodes]
+       barcode_counts <- table(dt$original_barcodes)
+       new_barcodes <- filtered_meta$barcodes[match(names(barcode_counts), filtered_meta$original_barcodes)]
+       
+       mat_list <- list(matrix = list(barcodes = new_barcodes,
+                                      data = dt$x,
+                                      indices = dt$i - 1,
+                                      indptr = c(0, cumsum(barcode_counts)),
+                                      shape = c(n_features, nrow(filtered_meta)),
+                                      features = reference_meta[[mat_name]],
+                                      observations = obs_list))
+       rm(dt)
+       
+       out_file <- paste0(out_prefix, mat_name, ".h5")
+       stm(paste("Writing .h5 file to:", out_file))
+       write_h5_list(mat_list,
+                     out_file,
+                     overwrite = TRUE)
+       
+       rm(mat_list)
+     })
+```
+
+[Return to Contents](#contents)
+
+### Window count matrices
+```{r}
+stm("Building window matrices")
+window_sizes <- as.numeric(sub("window_([0-9]+)k","\\1",window_mat_names)) * 1000
+
+window_offsets <- map(window_sizes,
+                      function(size) {
+                        read_chrom_sizes(genome = genome,
+                                         window_size = size)
+                      })
+names(window_offsets) <- window_mat_names
+
+window_metas <- map(seq_along(window_offsets),
+                    function(x) {
+                      offsets <- window_offsets[[x]]
+                      window_mat_name <- window_mat_names[x]
+                      window_size <- window_sizes[x]
+                      
+                      region_bed <- window_index_to_bed(1:sum(offsets$n_windows),
+                                                        offsets,
+                                                        window_size = window_size)
+                      region_bed$start <- as.character(format(region_bed$start, scientific = FALSE))
+                      region_bed$end <- as.character(format(region_bed$end, scientific = FALSE))
+                      list(name = gsub(" +","",paste(region_bed$chr, region_bed$start, region_bed$end, sep = "_")),
+                           id = paste0(genome, "_", window_mat_name, "_", 1:nrow(region_bed)))
+                      
+                    })
+names(window_metas) <- window_mat_names
+```
+
+#### Generate window matrices
+```{r Window Matrices}
+walk(seq_along(window_mat_files),
+     function(x) {
+       window_mat_file <- window_mat_files[x]
+       window_mat_name <- window_mat_names[x]
+       window_size <- window_sizes[x]
+       
+       window_offsets <- window_offsets[[window_mat_name]]
+       window_meta <- window_metas[[window_mat_name]]
+       
+       stm(paste("Building",window_mat_name,"matrix"))
+       
+       dt <- fread(window_mat_file,
+                   header = FALSE,
+                   col.names = c("original_barcodes",
+                                 "chr",
+                                 "chr_i",
+                                 "x"),
+                   colClasses = list("character" = c(1,2),
+                                     "integer" = c(3,4)))
+       
+       dt <- dt[original_barcodes %in% filtered_meta$original_barcodes]
+       offsets <- window_offsets[,c("chr","offset")]
+       
+       dt <- dt[offsets, on = "chr"]
+       dt$i <- dt$chr_i + dt$offset
+       dt <- dt[!is.na(original_barcodes)]
+       dt <- setorder(dt, original_barcodes, i)
+       
+       barcode_counts <- table(dt$original_barcodes)
+       new_barcodes <- filtered_meta$barcodes[match(names(barcode_counts), filtered_meta$original_barcodes)]
+       
+       window_list <- list(matrix = list(barcodes = new_barcodes,
+                                         data = dt$x,
+                                         indices = dt$i - 1,
+                                         indptr = c(0, cumsum(barcode_counts)),
+                                         shape = c(sum(window_offsets$n_windows),
+                                                   nrow(filtered_meta)),
+                                         features = window_meta,
+                                         observations = obs_list))
+       rm(dt)
+       
+       window_list$matrix$observations <- as.list(filtered_meta)
+       
+       out_file <- paste0(out_prefix, window_mat_name, ".h5")
+       stm(paste("Writing .h5 file to:", out_file))
+       write_h5_list(window_list,
+                     out_file,
+                     overwrite = TRUE)
+       
+       rm(window_list)
+     })
+```
+
+[Return to Contents](#contents)
+
+<a id="qc_stats"></a>
+
+### QC Stats
+
+```{r}
+qc_list <- list(report_type = "atac_qc",
+                report_datetime = as.character(start_time),
+                report_uuid = ids::uuid(use_time = TRUE),
+                package = "ATAComb",
+                package_version = sessionInfo()$otherPkgs$ATAComb$Version,
+                well_id = in_well)
+
+out_json <- paste0(out_prefix, "atac_qc_metrics.json")
+```
+
+[Return to Contents](#contents)
+
+<a id="barcode_stats"></a>
+
+#### Barcode QC Stats
+```{r}
+barcode_conditions <- list(
+  "all" = rep(TRUE, nrow(meta)),
+  "pass_qc" = meta$altius_frac > cutoffs$altius_frac & meta$peaks_frac > cutoffs$peaks_frac & meta$tss_frac > cutoffs$tss_frac,
+  "fail_qc" = meta$altius_frac < cutoffs$altius_frac | meta$peaks_frac < cutoffs$peaks_frac | meta$tss_frac < cutoffs$tss_frac,
+  "fail_altius_frac" = meta$altius_frac < cutoffs$altius_frac,
+  "fail_peaks_frac" = meta$peaks_frac < cutoffs$peaks_frac,
+  "fail_tss_frac" = meta$tss_frac < cutoffs$tss_frac,
+  "fail_all" = meta$altius_frac < cutoffs$altius_frac & meta$peaks_frac < cutoffs$peaks_frac & meta$tss_frac < cutoffs$tss_frac,
+  "doublets" = meta$altius_frac > cutoffs$altius_frac & meta$peaks_frac > cutoffs$peaks_frac & meta$tss_frac > cutoffs$tss_frac & !meta$singlet,
+  "singlets" = meta$altius_frac > cutoffs$altius_frac & meta$peaks_frac > cutoffs$peaks_frac & meta$tss_frac > cutoffs$tss_frac & meta$singlet
+)
+
+perc_of <- function(x, d) {
+  round(sum(x) / d * 100, 2)
+}
+
+q_of <- function(x, target, q) {
+  vals <- target[x]
+  round(quantile(vals, probs = q), 4)
+}
+
+barcode_qc_stats <- data.frame(
+  metric = c("Barcodes with > 1k reads",
+             "Barcodes pass QC",
+             "Barcodes fail QC",
+             "Barcodes fail altius_frac",
+             "Barcodes fail peaks_frac",
+             "Barcodes fail tss_frac",
+             "Barcodes fail all",
+             "Doublets pass QC",
+             "Singlets pass QC"),
+  count = sapply(barcode_conditions, sum),
+  percent = sapply(barcode_conditions, perc_of, nrow(meta)),
+  median_fragments = sapply(barcode_conditions, q_of, meta$n_fragments, .50),
+  median_unique = sapply(barcode_conditions, q_of, meta$n_unique, .50),
+  median_altius_frac = sapply(barcode_conditions, q_of, meta$altius_frac, .50),
+  median_peaks_frac = sapply(barcode_conditions, q_of, meta$peaks_frac, .50),
+  median_tss_frac = sapply(barcode_conditions, q_of, meta$tss_frac, .50))
+
+qc_list$barcode_qc_stats <- as.list(barcode_qc_stats)
+qc_list$barcode_qc_stats$metric <- c("barcodes_gt1k","barcodes_pass_qc","barcodes_fail_qc",
+                                     "barcodes_fail_altius_frac","barcodes_fail_peaks_frac","barcodes_fail_tss_frac","barcodes_fail_all")
+
+qc_table(barcode_qc_stats)
+```
+
+[Return to Contents](#contents)
+
+<a id="fragment_stats"></a>
+
+#### Fragment QC stats
+```{r}
+if(file.exists(in_sum)) {
+  metrics_summary <- read.csv(in_sum)
+  
+  metrics_summary$total_usable_fragments <- floor(metrics_summary$ATAC.Sequenced.read.pairs * metrics_summary$ATAC.Confidently.mapped.read.pairs * metrics_summary$ATAC.Fraction.of.high.quality.fragments.in.cells)
+  
+  saturation_counts <- fread(paste0(in_prefix, "_saturation_curve.tsv.gz"),
+                             header = F,
+                             col.names = c("count", "frequency"))
+  saturation_counts$count <- as.numeric(sub("\\r","",saturation_counts$count))
+  
+  fragment_qc_stats <- data.frame(metric = c("Sequenced Fragments",
+                                             #"Mitochondrial Fragments",
+                                             "Total in Barcodes with > 1k Reads",
+                                             "Total in Barcodes passing QC",
+                                             "Total in Barcodes failing QC",
+                                             "Total Unique",
+                                             "Unique in Barcodes with > 1k Reads",
+                                             "Unique in Barcodes passing QC",
+                                             "Unique in Barcodes failing QC"),
+                                  count = c(metrics_summary$ATAC.Sequenced.read.pairs,
+                                            #ceiling(metrics_summary$ATAC.Sequenced.read.pairs * metrics_summary$frac_waste_mitochondrial),
+                                            sum(meta$n_fragments),
+                                            sum(filtered_meta$n_fragments),
+                                            sum(meta$n_fragments) - sum(filtered_meta$n_fragments),
+                                            sum(saturation_counts$frequency),
+                                            sum(meta$n_unique),
+                                            sum(filtered_meta$n_unique),
+                                            sum(meta$n_unique) - sum(filtered_meta$n_unique)))
+  fragment_qc_stats$millions <- round(fragment_qc_stats$count / 1e6, 2)
+  fragment_qc_stats$percent_of_sequenced <- round(fragment_qc_stats$count / fragment_qc_stats$count[1] * 100, 2)
+  fragment_qc_stats$percent_of_unique <- round(fragment_qc_stats$count / sum(saturation_counts$frequency) * 100, 2)
+  fragment_qc_stats$percent_of_unique[1:5] <- NA
+  
+  qc_list$fragment_qc_stats <- as.list(fragment_qc_stats)
+  qc_list$fragment_qc_stats$metric <- c("total_frags",#"mito_frags",
+                                        "total_frags_gt1k","total_frags_pass_qc","total_frags_fail_qc",
+                                        "unique_frags","unique_frags_gt1k","unique_frags_pass_qc","unique_frags_fail_qc")
+} else {
+  saturation_counts <- fread(paste0(in_prefix, "_saturation_curve.tsv.gz"),
+                             header = F,
+                             col.names = c("count", "frequency"))
+  saturation_counts$count <- as.numeric(sub("\\r","",saturation_counts$count))
+  
+  fragment_qc_stats <- data.frame(metric = c("Total Unique",
+                                             "Unique in Barcodes with > 1k Reads",
+                                             "Unique in Barcodes passing QC",
+                                             "Unique in Barcodes failing QC"),
+                                  count = c(sum(saturation_counts$frequency),
+                                            sum(meta$n_unique),
+                                            sum(filtered_meta$n_unique),
+                                            sum(meta$n_unique) - sum(filtered_meta$n_unique)))
+  fragment_qc_stats$millions <- round(fragment_qc_stats$count / 1e6, 2)
+  fragment_qc_stats$percent_of_unique <- round(fragment_qc_stats$count / sum(saturation_counts$frequency) * 100, 2)
+  
+  qc_list$fragment_qc_stats <- as.list(fragment_qc_stats)
+  qc_list$fragment_qc_stats$metric <- c("unique_frags","unique_frags_gt1k","unique_frags_pass_qc","unique_frags_fail_qc")
+}
+
+qc_table(fragment_qc_stats)
+```
+
+[Return to Contents](#contents)
+
+<a id="saturation_stats"></a>
+
+#### Saturation metrics
+```{r}
+if(file.exists(in_sum)) {
+  stm("Generating library diversity projection")
+  
+  saturation_mat <- as.matrix(as.data.frame(saturation_counts))
+  
+  total_metrics <- data.frame(total_reads = metrics_summary$ATAC.Sequenced.read.pairs,
+                              total_umis = metrics_summary$total_usable_fragments,
+                              total_counts = sum(saturation_mat[,"count"] * saturation_mat[,"frequency"]))
+  
+  saturation_projection <- suppressWarnings(
+    diversity_projection(saturation_mat,
+                         total_metrics,
+                         max_val = 2e9)
+  )
+  
+  saturation_projection$type <- ifelse(saturation_projection$n_raw_reads < total_metrics$total_reads,
+                                       "actual",
+                                       "projected")
+  
+  saturation_projection$ratio <- saturation_projection$n_raw_reads/saturation_projection$expected_umis
+  saturation_projection$ratio[1] <- 0
+  
+  # Signal UMIs: UMIs in cells passing QC in peaks
+  saturation_projection$signal_umis <- floor(saturation_projection$expected_umis * 
+                                               fragment_qc_stats$percent_of_unique[fragment_qc_stats$metric == "Unique in Barcodes passing QC"] / 100 *
+                                               sum(filtered_meta$peaks_count) / sum(filtered_meta$n_unique))
+  
+  saturation_projection$signal_ratio <- saturation_projection$n_raw_reads / saturation_projection$signal_umis
+  saturation_projection$signal_ratio[1] <- 0
+  
+  # Precomputing millions of reads for display
+  saturation_projection$M_raw_reads <- round(saturation_projection$n_raw_reads/1e6, 2)
+  saturation_projection$M_umis <- round(saturation_projection$expected_umis/1e6, 2)
+  saturation_projection$M_signal_umis <- round(saturation_projection$signal_umis/1e6,2)
+}
+```
+
+#### Output projection values
+```{r}
+if(file.exists(in_sum)){
+  out_proj <- paste0(out_prefix, "saturation_projection.csv.gz")
+
+  stm(paste("Writing Saturation Projection to", out_proj))
+  print(paste("Writing Saturation Projection to", out_proj))
+  
+  fwrite(saturation_projection,
+         out_proj)
+}
+```
+
+#### Compute Break-points for specific ratios of raw reads to UMIs or signal UMIs
+```{r}
+if(file.exists(in_sum)) {
+  # 2:1, 3:1, and 4:1 break points for total UMIs
+  saturation_break_idx <- sapply(2:4, function(x) which.min(abs(saturation_projection$ratio-x)))
+  
+  saturation_breaks <- saturation_projection[saturation_break_idx,]
+  saturation_breaks$label <- c("2:1","3:1","4:1")
+  saturation_breaks$value <- c(2:4)
+  
+  # Filter out breaks that are nearest, but not very close to the actual break value
+  # removes things like adding a break at the final point even if it doesn't reach 4:1
+  saturation_breaks <- saturation_breaks[abs(saturation_breaks$value - saturation_breaks$ratio) < 0.1,]
+  
+  # 4:1, 8:1, and 16:1 break points for signal UMIs
+  signal_break_idx <- sapply(c(4,8,16), function(x) which.min(abs(saturation_projection$signal_ratio-x)))
+  
+  signal_breaks <- saturation_projection[signal_break_idx,]
+  signal_breaks$label <- c("2:1","4:1","16:1")
+  signal_breaks$value <- c(4,8,16)
+  
+  signal_breaks <- signal_breaks[abs(signal_breaks$value - signal_breaks$signal_ratio) < 0.1,]
+}
+```
+
+#### Display Break points for saturation of UMIs
+```{r}
+if(file.exists(in_sum)) {
+  # Abbreviated table for display
+  saturation_qc <- data.frame(break_target = saturation_breaks$value,
+                              umi_ratio = round(saturation_breaks$ratio,2),
+                              M_raw_reads = saturation_breaks$M_raw_reads,
+                              M_umis = saturation_breaks$M_umis,
+                              M_signal_umis = saturation_breaks$M_signal_umis)
+  
+  qc_list$saturation <- list()
+  qc_list$saturation$umi_breaks <- as.list(saturation_qc)
+  
+  qc_table(saturation_qc)
+}
+```
+
+#### Display Break points for saturation of signal UMIs
+```{r}
+if(file.exists(in_sum)) {
+  signal_qc <- data.frame(break_target = signal_breaks$value,
+                          signal_ratio = round(signal_breaks$signal_ratio, 2),
+                          M_raw_reads = signal_breaks$M_raw_reads,
+                          M_umis = signal_breaks$M_umis,
+                          M_signal_umis = signal_breaks$M_signal_umis)
+  
+  qc_list$saturation$signal_breaks <- as.list(signal_qc)
+  
+  qc_table(signal_qc)
+}
+```
+
+#### Saturation summary by sequencing depth
+```{r}
+if(file.exists(in_sum)) {
+  regular_break_idx <- which(saturation_projection$M_raw_reads %in% seq(200, 2000, by = 200))
+  
+  regular_qc <- data.frame(umi_ratio = round(saturation_projection$ratio[regular_break_idx], 2),
+                           signal_ratio = round(saturation_projection$signal_ratio[regular_break_idx], 2),
+                           M_raw_reads = saturation_projection$M_raw_reads[regular_break_idx],
+                           M_umis = saturation_projection$M_umis[regular_break_idx],
+                           M_signal_umis = saturation_projection$M_signal_umis[regular_break_idx])
+  
+  qc_list$saturation$raw_breaks <- as.list(regular_qc)
+  
+  qc_table(regular_qc)
+}
+```
+
+[Return to Contents](#contents)
+
+<a id="tenx_stats"></a>
+
+#### 10x Metrics
+```{r}
+if(file.exists(in_sum)) {
+  tenx_metrics <- data.frame(metric = names(metrics_summary),
+                             values = round(unlist(as.numeric(metrics_summary[1,])), 4))
+  
+  qc_list$tenx_metrics <- as.list(metrics_summary)
+  
+  qc_table(tenx_metrics)
+}
+```
+
+[Return to Contents](#contents)
+
+<a id="qc_plots"></a>
+
+### QC Plots
+
+<a id="saturation_plot"></a>
+
+#### Plot Library Saturation
+```{r}
+if(file.exists(in_sum)) {
+  reference_projections <- fread(system.file("reference/saturation/reference_projections.csv",
+                                             package = "ATAComb"))
+  reference_projections$dataset <- paste0("ref_",reference_projections$dataset)
+  
+  umi_saturation_plot <- ggplot() +
+    geom_line(data = reference_projections,
+              aes(x = n_raw_reads,
+                  y = expected_umis,
+                  group = dataset,
+                  color = dataset)) +
+    geom_line(data = saturation_projection,
+              aes(x = n_raw_reads,
+                  y = expected_umis,
+                  group = type,
+                  color = type),
+              size = 2)  +
+    scale_color_brewer("Data Type",
+                       type = "qual",
+                       palette = 2) +
+    scale_x_continuous("N Raw Reads (millions)",
+                       expand = c(0,0),
+                       breaks = seq(0, 2e9, by = 2.5e8),
+                       labels = seq(0, 2000, by = 250)) +
+    scale_y_continuous("N Unique Fragments (millions)", 
+                       expand = c(0,0),
+                       limits = c(0, 7.5e8),
+                       breaks = seq(0, 7.5e8, by = 2.5e8),
+                       labels = seq(0, 750, by = 250)) +
+    theme_bw() +
+    theme(panel.grid.minor = element_blank())
+  
+  if(nrow(saturation_breaks) > 0) {
+    umi_saturation_plot <- umi_saturation_plot +
+      geom_segment(data = saturation_breaks,
+                   aes(x = 0, xend = n_raw_reads,
+                       y = expected_umis, yend = expected_umis),
+                   linetype="dashed") +
+      geom_segment(data = saturation_breaks,
+                   aes(x = n_raw_reads, xend = n_raw_reads,
+                       y = 0, yend = expected_umis),
+                   linetype="dashed") +
+      geom_text(data = saturation_breaks,
+                aes(x = n_raw_reads, y = expected_umis + 1e7,
+                    label = label),
+                hjust = 0,
+                vjust = 0)
+  }
+  
+  umi_saturation_plot
+}
+```
+
+[Return to Contents](#contents)
+
+<a id="signal_plot"></a>
+
+#### Plot saturation of signal UMIs
+```{r}
+if(file.exists(in_sum)) {
+  signal_saturation_plot <- ggplot() +
+    geom_line(data = reference_projections,
+              aes(x = n_raw_reads,
+                  y = signal_umis,
+                  group = dataset,
+                  color = dataset)) +
+    geom_line(data = saturation_projection,
+              aes(x = n_raw_reads,
+                  y = signal_umis,
+                  group = type,
+                  color = type),
+              size = 2) +
+    scale_color_brewer("Data Type",
+                       type = "qual",
+                       palette = 2) +
+    scale_x_continuous("N Raw Reads (millions)",
+                       expand = c(0,0),
+                       breaks = seq(0, 2e9, by = 2.5e8),
+                       labels = seq(0, 2000, by = 250)) +
+    scale_y_continuous("N Unique Fragments in Peaks (millions)", 
+                       expand = c(0,0),
+                       limits = c(0, 2e8),
+                       breaks = seq(0, 2e8, by = 2.5e7),
+                       labels = seq(0, 200, by = 25)) +
+    theme_bw() +
+    theme(panel.grid.minor = element_blank())
+  
+  if(nrow(signal_breaks) > 0) {
+    signal_saturation_plot <- signal_saturation_plot +
+      geom_segment(data = signal_breaks,
+                   aes(x = 0, xend = n_raw_reads,
+                       y = signal_umis, yend = signal_umis),
+                   linetype="dashed") +
+      geom_segment(data = signal_breaks,
+                   aes(x = n_raw_reads, xend = n_raw_reads,
+                       y = 0, yend = signal_umis),
+                   linetype="dashed") +
+      geom_text(data = signal_breaks,
+                aes(x = n_raw_reads, y = signal_umis + 5e6,
+                    label = label),
+                vjust = 0)
+  }
+  
+  signal_saturation_plot
+}
+```
+
+[Return to Contents](#contents)
+
+<a id="width_plot"></a>
+
+#### Plot Fragment Widths
+```{r}
+frag_widths <- fread(paste0(in_prefix, "_fragment_widths.tsv.gz"),
+                     header = FALSE,
+                     col.names = c("original_barcodes", "width", "count"),
+                     colClasses = list("character" = 1,
+                                       "integer" = c(2,3)))
+frag_widths$pass_fail <- ifelse(frag_widths$original_barcodes %in% filtered_meta$original_barcodes,
+                                "pass_qc",
+                                "fail_qc")
+frag_widths <- frag_widths[, sum(count), by = list(pass_fail, width)]
+names(frag_widths)[3] <- "totals"
+frag_widths <- frag_widths[, frac:=totals/sum(totals), by = list(pass_fail)]
+frag_widths <- frag_widths[width <= 750]
+
+out_widths <- paste0(out_prefix, "fragment_width_summary.csv.gz") 
+
+stm(paste("Writing fragment width summary to", out_widths))
+fwrite(frag_widths, out_widths)
+
+ggplot(data = frag_widths) +
+  geom_line(aes(x = width,
+                y = frac,
+                group = pass_fail,
+                color = pass_fail),
+            size = 1) +
+  xlim(0, 750) +
+  facet_grid(rows = vars(pass_fail)) +
+  theme_bw()
+```
+
+[Return to Contents](#contents)
+
+<a id="all_hist_plot"></a>
+
+#### Histograms for all cells
+```{r}
+n_reads_hist <- qc_hist_plot(meta,
+                             column = "n_unique",
+                             name_x = "N Unique Fragments per Cell",
+                             log_x = TRUE,
+                             fill = "dodgerblue",
+                             target = 2500,
+                             y_max = 1000)
+altius_frac_hist <- qc_frac_hist_plot(meta,
+                                      column = "altius_frac",
+                                      name_x = "Frac Reads in Altius Index (altius_frac)",
+                                      fill = "darkgreen",
+                                      target = cutoffs$altius_frac,
+                                      y_max = 8000)
+peaks_frac_hist <- qc_frac_hist_plot(meta,
+                                     column = "peaks_frac",
+                                     name_x = "Frac Reads in Peaks (peaks_frac)",
+                                     fill = "mediumorchid3",
+                                     target = cutoffs$peaks_frac,
+                                     y_max = 5000)
+tss_frac_hist <- qc_frac_hist_plot(meta,
+                                   column = "tss_frac",
+                                   name_x = "Frac Reads in TSS (tss_frac)",
+                                   fill = "orangered",
+                                   target = cutoffs$tss_frac,
+                                   y_max = 5000)
+plot_list <- list(n_reads_hist,
+                  altius_frac_hist,
+                  peaks_frac_hist,
+                  tss_frac_hist)
+
+cowplot::plot_grid(plotlist = plot_list,
+                   nrow = 4, ncol = 1)
+```
+
+[Return to Contents](#contents)
+
+<a id="reads_altius_frac_plot"></a>
+
+#### Reads vs altius_frac scatter
+```{r}
+qc_scatter_plot(meta,
+                column_x = "n_unique",
+                name_x = "N Unique Fragments per Cell",
+                column_y = "altius_frac",
+                name_y = "Frac Fragments in Altius Index (altius_frac)",
+                log_x = TRUE, log_y = FALSE, frac_y = TRUE,
+                show_targets = FALSE,
+                color = "darkgreen") +
+  geom_vline(aes(xintercept = 2.5e3), linetype = "dashed", size = 0.2) +
+  geom_hline(aes(yintercept = cutoffs$altius_frac), linetype = "dashed", size = 0.2)
+```
+
+
+[Return to Contents](#contents)
+
+<a id="reads_peaks_frac_plot"></a>
+
+#### Reads vs peaks_frac scatter
+```{r}
+qc_scatter_plot(meta,
+                column_x = "n_unique",
+                name_x = "N Unique Fragments per Cell",
+                column_y = "peaks_frac",
+                name_y = "Frac Fragments in Peaks (peaks_frac)",
+                log_x = TRUE, log_y = FALSE, frac_y = TRUE,
+                show_targets = FALSE,
+                color = "darkgreen") +
+  geom_vline(aes(xintercept = 2.5e3), linetype = "dashed", size = 0.2) +
+  geom_hline(aes(yintercept = cutoffs$peaks_frac), linetype = "dashed", size = 0.2)
+```
+
+
+[Return to Contents](#contents)
+
+<a id="peaks_frac_tss_frac_plot"></a>
+
+#### peaks_frac vs tss_frac scatter
+```{r}
+qc_scatter_plot(meta,
+                column_x = "peaks_frac",
+                name_x = "Frac Reads in Peaks (peaks_frac)",
+                column_y = "tss_frac",
+                name_y = "Frac Reads in TSS (tss_frac)",
+                log_x = FALSE, frac_x = TRUE, log_y = FALSE, frac_y = TRUE,
+                show_targets = FALSE,
+                color = "mediumorchid3") +
+  geom_vline(aes(xintercept = cutoffs$tss_frac), linetype = "dashed", size = 0.2) +
+  geom_hline(aes(yintercept = cutoffs$peaks_frac), linetype = "dashed", size = 0.2)
+```
+
+
+[Return to Contents](#contents)
+
+<a id="rip_ritss_plot"></a>
+
+#### RIP vs RITSS scatter
+```{r}
+qc_scatter_plot(meta,
+                column_x = "peaks_count",
+                name_x = "N Reads in Peaks (peaks_frac)",
+                column_y = "tss_count",
+                name_y = "N Reads in TSS (tss_frac)",
+                log_x = TRUE, frac_x = FALSE, log_y = TRUE, frac_y = FALSE,
+                show_targets = TRUE,
+                color = "orangered")
+```
+
+[Return to Contents](#contents)
+
+<a id="filtered_hist_plot"></a>
+
+#### Filtered QC Histograms
+```{r}
+n_reads_hist <- qc_hist_plot(filtered_meta,
+                             column = "n_unique",
+                             name_x = "N Unique Fragments per Cell",
+                             log_x = TRUE,
+                             fill = "dodgerblue",
+                             target = 2500,
+                             y_max = 1000)
+altius_frac_hist <- qc_frac_hist_plot(filtered_meta,
+                                      column = "altius_frac",
+                                      name_x = "Frac Reads in Altius Index (altius_frac)",
+                                      fill = "darkgreen",
+                                      target = cutoffs$altius_frac,
+                                      y_max = 8000)
+peaks_frac_hist <- qc_frac_hist_plot(filtered_meta,
+                                     column = "peaks_frac",
+                                     name_x = "Frac Reads in Peaks (peaks_frac)",
+                                     fill = "mediumorchid3",
+                                     target = cutoffs$peaks_frac,
+                                     y_max = 5000)
+tss_frac_hist <- qc_frac_hist_plot(filtered_meta,
+                                   column = "tss_frac",
+                                   name_x = "Frac Reads in TSS (tss_frac)",
+                                   fill = "orangered",
+                                   target = cutoffs$tss_frac,
+                                   y_max = 5000)
+plot_list <- list(n_reads_hist,
+                  altius_frac_hist,
+                  peaks_frac_hist,
+                  tss_frac_hist)
+
+cowplot::plot_grid(plotlist = plot_list,
+                   nrow = 4, ncol = 1)
+```
+
+[Return to Contents](#contents)
+
+<a id="json_out"></a>
+
+### Write QC JSON
+
+```{r Save QC JSON}
+stm(paste0("Writing JSON to ",out_json))
+
+qc_list_json <- jsonlite::toJSON(qc_list,
+                                 auto_unbox = TRUE,
+                                 pretty = TRUE)
+
+writeLines(qc_list_json,
+           out_json)
+```
+
+[Return to Contents](#contents)
+
+<a id="session_info"></a>
+
+## Session Information
+
+```{r Session Info}
+sessionInfo()
+```
+
+Total time elapsed
+```{r Show Time}
+end_time <- Sys.time()
+diff_time <- end_time - start_time
+time_message <- paste0("Elapsed Time: ", 
+                       round(diff_time, 3),
+                       " ", units(diff_time))
+print(time_message)
+stm(time_message)
+stm("10x ATAC QC process complete.")
+```
+
+[Return to Contents](#contents)

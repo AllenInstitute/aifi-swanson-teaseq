@@ -1,0 +1,626 @@
+---
+title: "Figure 3 ICICLE"
+author: "Lucas Graybuck"
+date: "5/29/2020"
+output: html_document
+---
+
+## Setup
+
+Load Packages
+```{r}
+quiet_library <- function(...) {
+  suppressPackageStartupMessages(library(...))
+}
+
+quiet_library(H5weaver)
+quiet_library(ATAComb)
+quiet_library(uwot)
+quiet_library(readr)
+quiet_library(dplyr)
+quiet_library(purrr)
+quiet_library(ggplot2)
+quiet_library(ggrastr)
+quiet_library(cowplot)
+quiet_library(scrattch.vis)
+quiet_library(dendextend)
+options(stringsAsFactors = FALSE)
+set.seed(42)
+```
+
+Source directories
+```{r}
+filt_meta_dir <- "../../Data/X037_icicle/filtered_metadata/"
+archr_res_dir <- "../../Data/X037_icicle/archr_results/"
+peak_mat_dir <- "../../Data/X037_icicle/peaks_h5/"
+adt_count_dir <- "../../Data/X037_icicle/adt_counts/"
+```
+
+Selected wells:  
+X037-AP0C1W1, X037_icicle-1, Well 1 of ICICLE-seq Expt. 7  
+X037-AP0C1W2, X037_icicle-2, Well 2 of ICICLE-seq Expt. 7  
+```{r}
+wells_to_process <- list(icicle_1 = "X037_icicle-1",
+                         icicle_1 = "X037_icicle-2")
+well_labels <- c("ICICLE: Well 1",
+                 "ICICLE: Well 2")
+```
+
+Locate files
+```{r}
+filt_meta_files <- map2(filt_meta_dir, wells_to_process, list.files, full.names = TRUE)
+archr_res_files <- map2(archr_res_dir, wells_to_process, list.files, full.names = TRUE)
+peak_mat_files <- map2(peak_mat_dir, wells_to_process, list.files, full.names = TRUE)
+adt_count_files <- map2(adt_count_dir, wells_to_process, list.files, full.names = TRUE)
+```
+
+Display inputs
+```{r}
+print("Filtered Metadata Files:")
+print(unlist(filt_meta_files))
+```
+```
+print("ArchR Results Files:")
+print(unlist(archr_res_files))
+```
+
+```{r}
+print("Peak Matrix Files:")
+print(unlist(peak_mat_files))
+```
+
+```{r}
+print("ADT Count Files:")
+print(unlist(adt_count_files))
+```
+
+Read metadata files
+```{r message=FALSE}
+filt_meta_list <- map(filt_meta_files, 
+                      read_csv)
+meta_list <- filt_meta_list
+meta <- do.call(rbind, meta_list)
+```
+
+Read ArchR results files
+```
+archr_res_list <- map(archr_res_files, 
+                      read_csv)
+```
+
+Read peak matrices
+```{r}
+peak_mats <- map(peak_mat_files,
+                 read_h5_dgCMatrix)
+```
+
+Read ADT files
+```{r message = FALSE}
+adt_count_list <- map(adt_count_files, 
+                      read_csv)
+```
+
+### Filtering to remove doublets
+ArchR results are filtered to remove doublet cells.
+```
+meta_list <- map2(filt_meta_list, archr_res_list,
+                  function(filt_meta, archr_res) {
+                    left_join(archr_res, filt_meta)
+                  })
+celltypes <- unique(unlist(map(meta_list, function(meta) unique(meta$seurat_pbmc_type))))
+celltype_colors <- data.frame(seurat_pbmc_type = celltypes,
+                              seurat_pbmc_type_color = immutils::varibow(length(celltypes)))
+#color bug
+celltype_colors$seurat_pbmc_type_color[celltype_colors$seurat_pbmc_type == "Mono.CD16"] <- "#267DFF"
+meta_list <- map(meta_list,
+                  function(meta) {
+                    left_join(meta, celltype_colors)
+                  })
+```
+
+Filter ADT counts
+```{r}
+adt_count_list <- map2(adt_count_list, meta_list,
+                       function(adt_count, meta) {
+                         names(adt_count)[1] <- "original_barcodes"
+                         names(adt_count) <- gsub("-",".",names(adt_count))
+                         adt_count <- adt_count %>%
+                           filter(original_barcodes %in% meta$original_barcodes)
+                         adt_count$barcodes <- meta$barcodes[match(adt_count$original_barcodes, meta$original_barcodes)]
+                         adt_count <- adt_count[match(meta$barcodes, adt_count$barcodes),]
+                         adt_count
+                       })
+```
+
+
+Filter peak data too
+```{r}
+peak_mats <- map2(peak_mats, meta_list,
+                  function(peak_mat, meta) {
+                    peak_mat[,meta$barcodes]
+                  })
+
+peak_mat <- do.call(cbind, peak_mats)
+```
+
+
+### Dimension reduction
+```{r}
+peak_lsi <- atac_lsi(peak_mat,
+                     site_frequency_threshold = 0.001)
+peak_pcs <- peak_lsi$pcs[,2:20]
+```
+
+```{r}
+peak_umap <- umap(peak_pcs,
+                   scale = FALSE,
+                   min_dist = 0.2)
+peak_umap <- as.data.frame(peak_umap)
+names(peak_umap) <- c("umap_1","umap_2")
+
+peak_umap_df <- cbind(meta, peak_umap)
+```
+
+```{r}
+peak_plot_umap_log_unique <- ggplot(peak_umap_df) +
+  geom_point_rast(aes(x = umap_1,
+                      y = umap_2,
+                      color = peaks_frac),
+                  size = 0.2) +
+  scale_color_viridis_c("FRIP",
+                        limits = c(0,1)) +
+  theme_bw(base_size = 7) +
+  theme(legend.position = "bottom",
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank()) +
+  guides(color = guide_colourbar(title.position = "top",
+                                 barheight = unit(0.1, "in")))
+
+```
+
+```{r fig.width = 2, fig.height = 2.25}
+peak_plot_umap_log_unique
+```
+
+
+```
+peak_plots_umap_celltype <- map2(peak_umap_dfs, well_labels,
+                       function(peak_umap_df, well_label) {
+                         ggplot(peak_umap_df) +
+                           geom_point_rast(aes(x = umap_1,
+                                               y = umap_2,
+                                               color = seurat_pbmc_type_color)) +
+                           theme_bw(base_size = 7) +
+                           scale_color_identity() +
+                           theme(legend.position = "bottom",
+                                 axis.text = element_text(color = "black"),
+                                 axis.ticks = element_blank(),
+                                 panel.grid.minor = element_blank(),
+                                 panel.border = element_blank()) +
+                           ggtitle(well_label)
+                       })
+```
+
+```{ fig.width = 7.5, fig.height = 2}
+peak_plots_umap_celltype_grid
+```
+
+```{ fig.width = 1.5, fig.height = 2}
+ggplot(celltype_colors) +
+  geom_tile(aes(x = 1,
+                y = nrow(celltype_colors):1,
+                fill = seurat_pbmc_type_color)) +
+  geom_text(aes(x = 1.6,
+                y = nrow(celltype_colors):1,
+                label = seurat_pbmc_type),
+            hjust = 0,
+            size = 3) +
+  scale_fill_identity() +
+  xlim(0,5)+
+  theme_void()
+
+```
+
+```
+ggsave("Figure_2A_umaps_celltype.pdf",
+       peak_plots_umap_celltype_grid,
+       width = 7.5, height = 2.25,
+       useDingbats = FALSE)
+```
+
+### ADT dim reduction
+
+```{r}
+adt_features <- names(adt_count_list[[1]])[grepl("^CD|^HLA", names(adt_count_list[[1]]))]
+
+adt_mat_list <- map(adt_count_list,
+                    function(adt_count) {
+                      adt_mat <- as.matrix(adt_count[, adt_features])
+                      rownames(adt_mat) <- adt_count$barcodes
+                      t(adt_mat)
+                    })
+
+adt_mat <- do.call(cbind, adt_mat_list)
+```
+
+```{r}
+norm_adt_mat <- adt_mat / colSums(adt_mat)[col(adt_mat)] * 1e3
+norm_adt_mat <- log10(norm_adt_mat + 1)
+norm_adt_mat[is.na(norm_adt_mat)] <- 0
+```
+
+```{r}
+adt_umap <- umap(t(norm_adt_mat),
+                 min_dist = 0.2)
+adt_umap <- as.data.frame(adt_umap)
+names(adt_umap) <- c("adt_umap_1","adt_umap_2")
+
+adt_umap_df <- cbind(peak_umap_df, adt_umap)
+adt_umap_df <- left_join(adt_umap_df, 
+                         do.call(rbind,adt_count_list))
+```
+
+```{r}
+adt_plot_umap_frip <- ggplot(adt_umap_df) +
+  geom_point_rast(aes(x = adt_umap_1,
+                      y = adt_umap_2,
+                      color = peaks_frac),
+                  size = 0.2) +
+  scale_color_viridis_c("FRIP",
+                        limits = c(0,1)) +
+  theme_bw(base_size = 7) +
+  theme(legend.position = "bottom",
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank()) +
+  guides(color = guide_colourbar(title.position = "top",
+                                 barheight = unit(0.1, "in")))
+
+```
+
+```{r fig.width = 2, fig.height = 2.25}
+adt_plot_umap_frip
+```
+
+```{r}
+adt_plot_umap_logtotal <- ggplot(adt_umap_df) +
+  geom_point_rast(aes(x = adt_umap_1,
+                      y = adt_umap_2,
+                      color = log10(total + 1)),
+                  size = 0.2) +
+  scale_color_viridis_c(bquote(log[10]("Unique ADTs + 1")),
+                        limits = c(2,4.5)) +
+  theme_bw(base_size = 7) +
+  theme(legend.position = "bottom",
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank()) +
+  guides(color = guide_colourbar(title.position = "top",
+                                 barheight = unit(0.1, "in")))
+
+```
+
+```{r fig.width = 2, fig.height = 2.25}
+adt_plot_umap_logtotal
+```
+
+```{r}
+adt_plot_umap_log10_features <- map(adt_features,
+                                    function(feat) {
+                                      feat <- rlang::parse_expr(feat)
+                                      feat_range <- range(adt_umap_df[[feat]])
+                                      log_feat_range <- log10(feat_range + 1)
+                                      
+                                      ggplot(adt_umap_df) +
+                                        geom_point_rast(aes(x = adt_umap_1,
+                                                            y = adt_umap_2,
+                                                            color = log10(!!feat + 1)),
+                                                        size = 0.5) +
+                                        scale_color_viridis_c(feat,
+                                                              limits = c(1, log_feat_range[2]),
+                                                              na.value = "#000000") +
+                                        theme_bw(base_size = 7) +
+                                        theme(legend.position = "bottom",
+                                              axis.text = element_text(color = "black"),
+                                              axis.ticks = element_blank(),
+                                              panel.grid.minor = element_blank(),
+                                              panel.border = element_blank()) +
+                                        guides(color = guide_colourbar(title.position = "top",
+                                                                       barheight = unit(0.1, "in")))
+                                    })
+```
+
+```{r}
+adt_plot_umap_log10_features_grid <- plot_grid(
+  plotlist = adt_plot_umap_log10_features,
+  ncol = 4
+)
+```
+
+```{r fig.width = 6, fig.height = 6}
+adt_plot_umap_log10_features_grid
+```
+
+
+```{r}
+peak_plot_umap_log10_features <- map(adt_features,
+                                    function(feat) {
+                                      feat <- rlang::parse_expr(feat)
+                                      feat_range <- range(adt_umap_df[[feat]])
+                                      log_feat_range <- log10(feat_range + 1)
+                                      
+                                      ggplot(adt_umap_df) +
+                                        geom_point_rast(aes(x = umap_1,
+                                                            y = umap_2,
+                                                            color = log10(!!feat + 1)),
+                                                        size = 0.5) +
+                                        scale_color_viridis_c(feat,
+                                                              limits = c(1, log_feat_range[2]),
+                                                              na.value = "#000000") +
+                                        theme_bw(base_size = 7) +
+                                        theme(legend.position = "bottom",
+                                              axis.text = element_text(color = "black"),
+                                              axis.ticks = element_blank(),
+                                              panel.grid.minor = element_blank(),
+                                              panel.border = element_blank()) +
+                                        guides(color = guide_colourbar(title.position = "top",
+                                                                       barheight = unit(0.1, "in")))
+                                    })
+```
+
+```{r}
+peak_plot_umap_log10_features_grid <- plot_grid(
+  plotlist = peak_plot_umap_log10_features,
+  ncol = 4
+)
+```
+
+```{r fig.width = 6, fig.height = 6}
+peak_plot_umap_log10_features_grid
+```
+
+
+### UMAP Coordinate color cross-mapping
+
+```{r}
+xy2hex <- function(x, y) 
+{
+  x <- (x - min(x)) / max(x - min(x)) - 0.5
+  y <- (y - min(y)) / max(y - min(y)) - 0.5
+  h <- atan(y / x) * 2 / pi
+  h <- (h - min(h)) / max(h - min(h))
+  v <- sqrt(x^2 + y^2)
+  v <- (v - min(v)) / max(v - min(v))
+  v <- v / 2 + 0.5
+  
+  hsv(h = h, v = v, s = 0.8)
+}
+
+peak_umap_hex <- xy2hex(adt_umap_df$umap_1,
+                        adt_umap_df$umap_2)
+
+adt_umap_df$peak_umap_hex <- peak_umap_hex
+```
+
+```{r fig.width = 4, fig.height = 2}
+p1 <- ggplot(adt_umap_df) +
+  geom_point_rast(aes(x = umap_1,
+                      y = umap_2,
+                      color = peak_umap_hex),
+                  size = 0.5) +
+  scale_color_identity() + 
+  theme_bw(base_size = 7) +
+  theme(legend.position = "bottom",
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank())
+
+p2 <- ggplot(adt_umap_df) +
+  geom_point_rast(aes(x = adt_umap_1,
+                      y = adt_umap_2,
+                      color = peak_umap_hex),
+                  size = 0.5) +
+  scale_color_identity() + 
+  theme_bw(base_size = 7) +
+  theme(legend.position = "bottom",
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank())
+plot_grid(p1, p2, ncol = 2)
+```
+### Cluster in ATAC space
+
+Perform Jaccard-Louvain clustering
+```{r}
+peak_clusters <- atac_clustering(peak_pcs,
+                                 k = 9)
+adt_umap_df$peak_cluster <- peak_clusters$cl
+```
+
+Separate data from annotations for use with scrattch.vis
+```{r}
+data_df <- adt_umap_df
+data_df$sample_name <- data_df$barcodes
+data_df <- data_df %>% 
+  select(sample_name, all_of(adt_features))
+data_df[is.na(data_df)] <- 0
+
+anno_df <- adt_umap_df %>%
+  mutate(sample_name = barcodes) %>%
+  scrattch.io::annotate_cat(peak_cluster) %>%
+  mutate(peak_cluster_color = ifelse(nchar(peak_cluster_color) == 5,
+                                     paste0(peak_cluster_color, "FF"),
+                                     peak_cluster_color)) %>%
+  select(sample_name, everything()) %>%
+  select(-all_of(adt_features)) %>%
+  mutate(peak_cluster_id = as.numeric(peak_cluster_label))
+```
+
+Compute medians of data columns for use in cluster hierarchy and ordering
+```{r fig.width = 4, fig.height = 3}
+adt_scaled <- scale_gene_data(data_df,
+                              genes = adt_features,
+                              scale_type = "log10")
+adt_medians <- group_stats(adt_scaled,
+                           value_cols = adt_features,
+                           anno_df,
+                           grouping = "peak_cluster_id",
+                           stat = "mean")
+adt_medians_mat <- as.matrix(adt_medians[,-1])
+rownames(adt_medians_mat) <- adt_medians$peak_cluster_id
+
+adt_medians_dist <- dist(adt_medians_mat)
+adt_medians_hc <- hclust(adt_medians_dist,
+                         method = "ward.D2")
+cluster_order <- rownames(adt_medians_mat)[adt_medians_hc$order]
+plot(adt_medians_hc)
+```
+
+Rotate for plots
+```{r fig.width = 4, fig.height = 3}
+adt_medians_dend <- as.dendrogram(adt_medians_hc)
+adt_medians_dend <- adt_medians_dend %>%
+  rotate(as.character(c(8,4,7,16,3,13,2,6,9,15,11,12,5,14,10,1)))
+plot(adt_medians_dend)
+```
+
+Update cluster IDs to set order
+```{r}
+anno_df <- anno_df %>%
+  mutate(peak_cluster_id = match(peak_cluster_label, labels(adt_medians_dend)))
+```
+
+```{r fig.width = 2, fig.height = 4}
+p1 <- ggplot() +
+  geom_point_rast(data = anno_df,
+                  aes(x = umap_1,
+                      y = umap_2,
+                      color = peak_cluster_color),
+                  size = 0.5) +
+  geom_text(data = anno_df %>%
+              group_by(peak_cluster_label) %>%
+              summarise(umap_1 = mean(umap_1),
+                        umap_2 = mean(umap_2)),
+            aes(x = umap_1,
+                y = umap_2,
+                label = peak_cluster_label)) +
+  scale_color_identity() +
+  theme_bw(base_size = 7) +
+  theme(legend.position = "none",
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank())
+
+p2 <- ggplot() +
+  geom_point_rast(data = anno_df,
+                  aes(x = adt_umap_1,
+                      y = adt_umap_2,
+                      color = peak_cluster_color),
+                  size = 0.5) +
+  # geom_text(data = anno_df %>%
+  #             group_by(peak_cluster_label) %>%
+  #             summarise(adt_umap_1 = mean(adt_umap_1),
+  #                       adt_umap_2 = mean(adt_umap_2)),
+  #           aes(x = adt_umap_1,
+  #               y = adt_umap_2,
+  #               label = peak_cluster_label)) +
+  scale_color_identity() +
+  theme_bw(base_size = 7) +
+  theme(legend.position = "none",
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank())
+
+plot_grid(p1, p2, ncol = 1)
+```
+
+```{r fig.width = 6, fig.height = 6}
+library(scrattch.vis)
+group_violin_plot(data = data_df,
+                  anno = anno_df,
+                  genes = adt_features,
+                  grouping = "peak_cluster",
+                  log_scale = TRUE)
+```
+
+```{r fig.width = 4, fig.height = 4}
+library(scrattch.vis)
+sample_fire_plot(data = data_df,
+                 anno = anno_df,
+                 genes = adt_features,
+                 grouping = "peak_cluster",
+                 log_scale = TRUE,
+                 label_height = 10,
+                 max_width = 20)
+
+```
+### Joint reduction and clustering
+```{r}
+peak_pcs_with_adts <- cbind(peak_pcs[,1:11], t(norm_adt_mat))
+
+joint_umap <- umap(peak_pcs_with_adts,
+                   min_dist = 0.2,
+                   scale = "scale")
+
+anno_df$joint_umap_1 <- joint_umap[,1]
+anno_df$joint_umap_2 <- joint_umap[,2]
+```
+
+```{r fig.width = 2, fig.height = 4}
+p1 <- ggplot() +
+  geom_point_rast(data = anno_df,
+                  aes(x = umap_1,
+                      y = umap_2,
+                      color = peak_cluster_color),
+                  size = 0.5) +
+  geom_text(data = anno_df %>%
+              group_by(peak_cluster_label) %>%
+              summarise(umap_1 = mean(umap_1),
+                        umap_2 = mean(umap_2)),
+            aes(x = umap_1,
+                y = umap_2,
+                label = peak_cluster_label)) +
+  scale_color_identity() +
+  theme_bw(base_size = 7) +
+  theme(legend.position = "none",
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank())
+
+p2 <- ggplot() +
+  geom_point_rast(data = anno_df,
+                  aes(x = joint_umap_1,
+                      y = joint_umap_2,
+                      color = peak_cluster_color),
+                  size = 0.5) +
+  # geom_text(data = anno_df %>%
+  #             group_by(peak_cluster_label) %>%
+  #             summarise(adt_umap_1 = mean(adt_umap_1),
+  #                       adt_umap_2 = mean(adt_umap_2)),
+  #           aes(x = adt_umap_1,
+  #               y = adt_umap_2,
+  #               label = peak_cluster_label)) +
+  scale_color_identity() +
+  theme_bw(base_size = 7) +
+  theme(legend.position = "none",
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank())
+
+plot_grid(p1, p2, ncol = 1)
+```
+
+
+```{r}
+sessionInfo()
+```
