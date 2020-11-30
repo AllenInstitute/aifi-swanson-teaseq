@@ -18,6 +18,7 @@
 #### [General Notes](#gen)  
 - [Genome Builds](#gen-gen)  
 - [Computing Environment](#gen-com)  
+- [Software Dependencies](#gen-sof)  
 - [Reference Region Sets](#gen-ref)
 
 #### [scATAC-seq](#sca)  
@@ -98,6 +99,27 @@ All samples used in Swanson, *et al.* were from human donors. We use *GRCHg38/hg
 **Computing Environment**  
 Preprocessing and analysis scripts were generated and run on Linux/Unix-like platforms (Debian/Ubuntu) with R >= v3.6.3 and 4.0.2 .  
 
+<a name="gen-sof"></a>
+
+**Software Dependencies**  
+
+These software tools are used in various parts of our analysis and processing scripts:
+
+*command-line tools*
+[`bcl2fastq`](https://support.illumina.com/sequencing/sequencing_software/bcl2fastq-conversion-software.html)  
+[`cellranger-atac count` >= v1.0.0](https://support.10xgenomics.com/single-cell-atac/software/pipelines/latest/using/count)   
+[`bedtools2`](https://github.com/arq5x/bedtools2/releases)  
+[`GNU Parallel`](https://www.gnu.org/software/parallel/)  
+[`HTSlib and SAMtools`](http://www.htslib.org/download/)  
+
+*Github R packages*  
+[`ArchR`](https://www.archrproject.com/)  
+[Custom `Seurat` for 3-way WNN](https://github.com/aifimmunology/Seurat)  
+[`scrattch.vis`](https://github.com/AllenInstitute/scrattch.vis)  
+
+*Other R packages*  
+See the file [common/R_dependencies.R](https://github.com/AllenInstitute/aifi-swanson-teaseq/blob/master/common/R_dependencies.R) for additional dependencies from CRAN and BioConductor.
+
 <a name="gen-ref"></a>
 
 **Reference Region Sets**  
@@ -108,6 +130,7 @@ The references used for analysis are:
 2. ENSEMBLv93 TSS regions (TSS +/- 2kb) filtered as for **1.**  
 3. scATAC-seq PBMC peaks from [Lareau, *et al.*](https://pubmed.ncbi.nlm.nih.gov/31235917/) at GEO Accession [GSE123577](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE123577).  
 4. ENCODE/Altius DNase-seq Index regions from [Mouleman, *et al.*](https://www.nature.com/articles/s41586-020-2559-3) at ENCODE File ID [ENCFF503GCK](https://www.encodeproject.org/files/ENCFF503GCK/).  
+
 
 [Return to Contents](#con)
 
@@ -129,11 +152,6 @@ The scATAC-seq preprocessing and analysis pipelines are built around libraries w
 - `I2`: 16 nt, 10x Cell Barcodes  
 - `R1`: 50 nt, ATAC-seq fragment insertion  
 - `R2`: 50 nt, ATAC-seq fragment insertion  
-
-**Software**  
-Alignment: 10x Genomics [`cellranger-atac count` >= v1.0.0](https://support.10xgenomics.com/single-cell-atac/software/pipelines/latest/using/count)   
-Preprocessing: [`bedtools2`](https://github.com/arq5x/bedtools2/releases)  
-Paralellization: [`GNU Parallel`](https://www.gnu.org/software/parallel/)  
 
 [Return to Contents](#con)
 
