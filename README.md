@@ -125,8 +125,8 @@ The references used for analysis are:
 
 **Sequencing Data**  
 The scATAC-seq preprocessing and analysis pipelines are built around libraries with the [10x Genomics scATAC-seq read structure](https://support.10xgenomics.com/single-cell-atac/sequencing/doc/specifications-sequencing-requirements-for-single-cell-atac):  
-- `I1`: 16 nt, 10x Cell Barcodes  
-- `I2`: 8 nt, i7 Well/sample Indexes  
+- `I1`: 8 nt, i7 Well/sample Indexes  
+- `I2`: 16 nt, 10x Cell Barcodes  
 - `R1`: 50 nt, ATAC-seq fragment insertion  
 - `R2`: 50 nt, ATAC-seq fragment insertion  
 
@@ -354,7 +354,7 @@ Rscript 04_run_archr_atac_analysis.R \
 *Figure 2*  
 [scatac_analysis/Figure-2_analysis.Rmd](https://github.com/AllenInstitute/aifi-swanson-teaseq/blob/master/scatac_analysis/Figure-1-FS-5_analysis.Rmd)
 
-*Table 1*
+*Table 1*  
 [scatac_analysis/Table-1_analysis.Rmd](https://github.com/AllenInstitute/aifi-swanson-teaseq/blob/master/scatac_analysis/Figure-1-FS-5_analysis.Rmd)
 
 [Return to Contents](#con)
@@ -411,7 +411,18 @@ In its current implementation, BarCounter expects reads to conform to the cell a
 
 #### ICICLE-seq Requirements
 
-*TODO*  
+**Sequencing Data**  
+ICICLE-seq data consists of two sequencing libraries from each well - one for the ATAC data, and the other of ADT data. These can be sequenced separately or together. If together, there will be excess bases at the 3' end of the ADT library R2 read.  
+
+ATAC data:  
+- `R1`: 28 nt, 10x Cell Barcodes and UMIs  
+- `I2`: 8 nt, i7 Well/Method Indexes  
+- `R2`: 100 nt, ATAC-seq fragment insertion  
+
+ADT data:  
+- `R1`: 28 nt, 10x Cell Barcodes and UMIs  
+- `I2`: 8 nt, i7 Well/Method Indexes  
+- `R2`: 100 nt, the first 15nt of which are the ADT epitope barcodes.  
 
 [Return to Contents](#con)
 
@@ -442,8 +453,10 @@ Processed data from ICICLE-seq datasets used in Swanson, *et al.* will be availa
 #### ICICLE-seq Analysis
 
 *Figure 3*  
+[icicle_analysis/Figure-3_analysis.Rmd](https://github.com/AllenInstitute/aifi-swanson-teaseq/blob/master/icicle_analysis/Figure-3_analysis.Rmd)
 
 *Figure 3 - Figure Supplement 2*  
+also in [icicle_analysis/Figure-3_analysis.Rmd](https://github.com/AllenInstitute/aifi-swanson-teaseq/blob/master/icicle_analysis/Figure-3_analysis.Rmd)
 
 [Return to Contents](#con)
 
@@ -453,13 +466,38 @@ Processed data from ICICLE-seq datasets used in Swanson, *et al.* will be availa
 
 ### TEA-seq
 
-*TODO*  
+TEA-seq is a 3-modality single cell assay that simultaneously measures transcription (using 3' scRNA-seq), epitopes (using oligo-tagged antibodies), and accessibility (using scATAC-seq) on the 10x Genomics Multiome RNA + ATAC kit. 
 
 <a name="tea-req"></a>
 
 #### TEA-seq Requirements
 
-*TODO*  
+**Sequencing Data**  
+TEA-seq data consists of three sequencing libraries from each well - one for RNA-seq data, one for ATAC data, and the third for ADT data. All 3 can be sequenced simultaneously with these read lengths:  
+- `R1`: 50 nt  
+- `I1`: 10 nt  
+- `I2`: 16 nt  
+- `R2`: 90 nt
+
+If working with a sequencing vendor, you may need to demultiplex these samples yourself using `bcl2fastq` to convert to FASTQ files with appropriate read lengths (see [teaseq_preprocessing/00_teaseq_bcl2fastq.sh](https://github.com/AllenInstitute/aifi-swanson-teaseq/blob/master/teaseq_preprocessing/00_teaseq_bcl2fastq.sh)).
+
+After dumultiplexing, reads for each assay will be as follows:
+
+ADT data:  
+- `R1`: 28 nt, 10x Cell Barcodes and UMIs  
+- `I1`: 8 nt, i7 Well/Method Indexes  
+- `R2`: 90 nt, the first 15nt of which are the ADT epitope barcodes.  
+
+ATAC data:  
+- `R1`: 50 nt, ATAC-seq fragment insertion  
+- `I1`: 8 nt, i7 Well/Method Indexes  
+- `I2`: 16 nt, 10x Cell Barcodes  
+- `R2`: 100 nt, ATAC-seq fragment insertion  
+
+RNA data:  
+- `R1`: 28 nt, 10x Cell Barcodes and UMIs  
+- `I1`: 8 nt, i7 Well/Method Indexes  
+- `R2`: 90 nt, cDNA fragment sequence  
 
 [Return to Contents](#con)
 
@@ -492,10 +530,13 @@ Processed data from ICICLE-seq datasets used in Swanson, *et al.* will be availa
 #### TEA-seq Analysis
 
 *Figure 4*  
+[teaseq_analysis/Figure-4_analysis.Rmd](https://github.com/AllenInstitute/aifi-swanson-teaseq/blob/master/teaseq_analysis/Figure-4_analysis.Rmd)
 
 *Figure 4 - Figure Supplement 1*  
+also in [teaseq_analysis/Figure-4_analysis.Rmd](https://github.com/AllenInstitute/aifi-swanson-teaseq/blob/master/teaseq_analysis/Figure-4_analysis.Rmd)
 
 *Figure 4 - Figure Supplement 2*  
+also in [teaseq_analysis/Figure-4_analysis.Rmd](https://github.com/AllenInstitute/aifi-swanson-teaseq/blob/master/teaseq_analysis/Figure-4_analysis.Rmd)
 
 [Return to Contents](#con)
 
