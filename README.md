@@ -1,5 +1,9 @@
 ## aifi-swanson-teaseq
 
+#### Under Revision
+
+This repository and the associated manuscript are currently under review. Expect revisions and alterations to the code here to make it more streamlined, reusable, and address reviewer comments.
+
 #### Code related to Swanson, *et. al*. for scATAC-seq, ICICLE-seq,   
 #### and TEA-seq data processing, analysis and visualization.  
 
@@ -109,8 +113,16 @@ These software tools are used in various parts of our analysis and processing sc
 [`bcl2fastq`](https://support.illumina.com/sequencing/sequencing_software/bcl2fastq-conversion-software.html)  
 [`cellranger-atac count` >= v1.0.0](https://support.10xgenomics.com/single-cell-atac/software/pipelines/latest/using/count)   
 [`bedtools2`](https://github.com/arq5x/bedtools2/releases)  
+[`bowtie2`](http://bowtie-bio.sourceforge.net/bowtie2/index.shtml)  
+[`fastp`](https://github.com/OpenGene/fastp)  
+[`GATK >= v3.7`](https://github.com/broadinstitute/gatk/releases)  
 [`GNU Parallel`](https://www.gnu.org/software/parallel/)  
 [`HTSlib and SAMtools`](http://www.htslib.org/download/)  
+
+
+*Language requirements*  
+[`python >= 3.7`](https://www.python.org/downloads/)  
+[`R >= 3.6.3`](https://cran.r-project.org/)  
 
 *Github R packages*  
 [`ArchR`](https://www.archrproject.com/)  
