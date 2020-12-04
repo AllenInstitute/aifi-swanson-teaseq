@@ -73,7 +73,7 @@ Elliott Swanson, Cara Lord, Julian Reading, Alexander T. Heubeck, Adam K. Savage
 
 ### Protocols
 
-A detailed bench protocol for TEA-seq written by Elliott Swanson is [available on protocols.io](https://www.protocols.io/edit/tea-seq-bpp2mmqe).
+A detailed bench protocol for TEA-seq written by Elliott Swanson is [available on protocols.io](https://www.protocols.io/view/tea-seq-bqagmsbw).
 
 [Return to Contents](#con)
 
