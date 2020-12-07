@@ -425,7 +425,49 @@ In its current implementation, BarCounter expects reads to conform to the cell a
 
 #### BarCounter Usage
 
-*TODO*  
+BarCounter requires both a cell barcode list and a list of ADT tags for counting antibody UMI abundance. The cell barcode list can be either the full list of available barcodes or a filtered list of barcodes that pass QC criteria (e.g. `outs/filtered_feature_bc_matrix/barcodes.tsv` from CellRanger outputs).
+
+BarCounter has the following parameters:
+
+* `-w` path to a barcode "whitelist" `.txt` or `txt.gz` file  
+* `-t` path to an ADT "taglist" `.csv` or `csv.gz` file  
+* `-1` path to `summary.csv` from `cellranger-atac count`  
+* `-2` a `SampleSheet.csv` file, described below  
+* `-o` path to an output directory  
+
+Full barcode lists for `-w` are provided by 10x Genomics in the cellranger files.  
+
+They can be found in these locations relative to the base cellranger directory:  
+CellRanger ARC v1.0.0: `cellranger-arc-1.0.0/lib/python/cellranger/barcodes/`  
+CellRanger v3.1.0: `cellranger-3.1.0/cellranger-cs/3.1.0/lib/python/cellranger/barcodes/`  
+CellRanger v4.0.0: `cellranger-4.0.0/lib/python/cellranger/barcodes/`  
+CellRanger v5.0.0: `cellranger-5.0.0/lib/python/cellranger/barcodes/`  
+
+The ADT taglist for `-t` should be a 2-column `.csv` file without a header, for example:  
+```
+CAGCCATTCATTAGG,CD10
+GACAAGTGATCTGCA,CD11b
+TACGCCTATAACTTG,CD11c
+CTTCACTCTGTCAGG,CD123
+GTGTGTTGTCCTATG,CD127
+TCTCAGACCTCCGTA,CD14
+```
+
+Multiple R1 and R2 files can be supplied to the `-1` and `-2` arguments. These should be comma-separated without a space, e.g. for two lanes:  
+```
+-1 S001_S1_L001_R1_001.fastq.gz,S001_S1_L002_R1_001.fastq.gz
+-2 S001_S1_L001_R2_001.fastq.gz,S001_S1_L002_R2_001.fastq.gz
+```
+
+An example BarCounter run:  
+```
+/shared/apps/barcounter \
+  -w /shared/apps/cellranger-arc-1.0.0/lib/python/cellranger/barcodes/737K-arc-v1.txt.gz \
+  -t X061_barcounter_taglist_18OCT2020.csv \
+  -1 /mnt/x060-multiome/fastq_downsampled/ADT_125M/X061-AP0C1W1-C_S1_L001_R1_001.fastq.gz \
+  -2 /mnt/x060-multiome/fastq_downsampled/ADT_125M/X061-AP0C1W1-C_S1_L001_R2_001.fastq.gz \
+  -o /mnt/x060-multiome/barcounter_downsampled/X061-AP0C1W1
+```
 
 [Return to Contents](#con)
 
