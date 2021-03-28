@@ -62,6 +62,8 @@ This repository and the associated manuscript are currently under review. Expect
 - [Preprocessing](#cite-pre)  
 - [Analysis](#cite-ana)  
 
+#### [All Datasets](#all-dat)
+
 #### [Legal](#leg)
 - [License](#leg-lic)  
 - [Level of Support](#leg-lev)  
@@ -465,8 +467,6 @@ Rscript 04_run_archr_atac_analysis.R \
 
 ------------
 
-<<<<<<< HEAD
-=======
 <a name="bar"></a>
 
 ### BarCounter  
@@ -549,7 +549,6 @@ An example BarCounter run:
 
 ------------
 
->>>>>>> 423953cde1c1e4f616aee2f92b2a6e1c0944a7a5
 <a name="ici"></a>
 
 ### ICICLE-seq
@@ -574,6 +573,8 @@ ADT data:
 - `R2`: 100 nt, the first 15nt of which are the ADT epitope barcodes.  
 
 [Return to Contents](#con)
+
+<a name="ici-dat"></a>
 
 #### ICICLE-seq Datasets
 
@@ -813,6 +814,54 @@ Processed data from CITE-seq dataset used in Swanson, *et al.* will be available
 #### CITE-seq Analysis
 
 **To Do**
+
+[Return to Contents](#con)
+
+------------
+
+<a name="all-dat"></a>
+
+### All Datasets
+
+For convenience, we list all datasets for all methods in Swanson, et al. below:
+
+| Method | Accession | PBMC Type | Perm/Nuc | Prep | Purification | Pur. Method | WellID |
+| ---       | ---       | ---       | ---      | ---  | ---          | ---         | ---     |
+| scATAC-seq | [GSM4784064](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM4784064) |  leukapheresis | Perm | 0.01% Dig. |none | none | B003-W7 |
+| scATAC-seq | [GSM4784065](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM4784065) |  leukapheresis | Perm | 0.01% Dig. | FACS | D/D-Neu. | B003-W8 |
+| scATAC-seq | [GSM4784066](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM4784066) |  ficoll | Nuc | 1x 10xNIB |none | none | X024-W1 |
+| scATAC-seq | [GSM4784067](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM4784067) |  ficoll | Nuc | 0.25x 10xNIB |none | none | X024-W2 |
+| scATAC-seq | [GSM4784068](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM4784068) |  ficoll | Nuc | 0.1x 10xNIB |none | none | X024-W3 |
+| scATAC-seq | [GSM4784069](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM4784069) |  ficoll | Nuc | 1x ANIB |none | none | X024-W4 |
+| scATAC-seq | [GSM4784070](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM4784070) |  ficoll | Perm | 0.01% Dig. |none | none | X025-W1 |
+| scATAC-seq | [GSM4784071](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM4784071) |  ficoll | Perm | 0.05% Dig. |none | none | X025-W2 |
+| scATAC-seq | [GSM4784072](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM4784072) |  ficoll | Perm | 0.1% Dig. |none | none | X025-W3 |
+| scATAC-seq | [GSM4784073](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM4784073) |  ficoll | Perm | 0.2% Dig. |none | none | X025-W4 |
+| scATAC-seq | [GSM4784074](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM4784074) |  ficoll | Perm | 0.01% Dig. |none | none | X027-W1 |
+| scATAC-seq | [GSM4784075](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM4784075) |  ficoll | Perm | 0.01% Dig. | FACS | D/D-Neu. | X027-W3 |
+| scATAC-seq | [GSM4784076](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM4784076) |  ficoll | Perm | 0.01% Dig. | Mag. Bead | Negative | X032-W1 |
+| scATAC-seq | [GSM4784077](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM4784077) |  ficoll | Perm | 0.01% Dig. | Mag. Bead | anti-CD15 |  X032-W2 |
+| scATAC-seq | [GSM4784078](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM4784078) |  leukapheresis | Perm | 0.01% Dig. | Mag. Bead | Negative | X032-W3 |
+| scATAC-seq | [GSM4784079](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM4784079) |  leukapheresis | Perm | 0.01% Dig. | Mag. Bead | anti-CD15 | X032-W4 |
+| scATAC-seq | [GSM4784080](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM4784080) |  ficoll | Nuc | 1x 10xNIB |none | none | X041-W1 |
+| scATAC-seq | [GSM4784081](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM4784081) |  ficoll | Nuc | 1x 10xNIB | FACS | D/D | X041-W2 |
+| scATAC-seq | [GSM4784082](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM4784082) |  ficoll | Nuc | 1x 10xNIB | FACS | D/D-Neu. | X041-W3 |
+| scATAC-seq | [GSM4784083](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM4784083) |  ficoll | Perm | 0.01% Dig. |none | none | X041-W4 |
+| scATAC-seq | [GSM4784084](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM4784084) |  ficoll | Perm | 0.01% Dig. | FACS | D/D | X041-W5 |
+| scATAC-seq | [GSM4784085](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM4784085) |  ficoll | Perm | 0.01% Dig. | FACS | D/D-Neu. | X041-W6 |
+| ICICLE-seq | [GSM4949911](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM4949911) | leukapheresis | Perm | 0.01% Dig. | FACS | D/D-Neu. | X061-AP0C1W1 |
+| ICICLE-seq | [GSM5123951](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM5123951) | leukapheresis | Perm | 0.01% Dig. | FACS | D/D-Neu. | X066-MP0C1W3 |
+| ICICLE-seq | [GSM5123952](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM5123951) | leukapheresis | Perm | 0.01% Dig. | FACS | D/D-Neu. | X066-MP0C1W4 |
+| ICICLE-seq | [GSM5123953](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM5123951) | leukapheresis | Perm | 0.01% Dig. | FACS | D/D-Neu. | X066-MP0C1W5 |
+| ICICLE-seq | [GSM5123954](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM5123951) | leukapheresis | Perm | 0.01% Dig. | FACS | D/D-Neu. | X066-MP0C1W6 |
+| TEA-seq | [GSM4949911](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM4949911) | leukapheresis | Perm | 0.01% Dig. | FACS | D/D-Neu. | X061-AP0C1W1 |
+| TEA-seq | [GSM5123951](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM5123951) | leukapheresis | Perm | 0.01% Dig. | FACS | D/D-Neu. | X066-MP0C1W3 |
+| TEA-seq | [GSM5123952](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM5123951) | leukapheresis | Perm | 0.01% Dig. | FACS | D/D-Neu. | X066-MP0C1W4 |
+| TEA-seq | [GSM5123953](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM5123951) | leukapheresis | Perm | 0.01% Dig. | FACS | D/D-Neu. | X066-MP0C1W5 |
+| TEA-seq | [GSM5123954](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM5123951) | leukapheresis | Perm | 0.01% Dig. | FACS | D/D-Neu. | X066-MP0C1W6 |
+| Multiome | [GSM5123949](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM5123949) | leukapheresis | Nuc  | 10x NIB    | FACS | D/D-Neu. | X066-MP0C1W1 |
+| Multiome | [GSM5123950](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM5123950) | leukapheresis | Perm | 0.01% Dig. | FACS | D/D-Neu. | X066-MP0C1W1 |
+| CITE-seq | [GSM5123955](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM5123955) | leukapheresis | Whole Cell | NA    | FACS | D/D-Neu. | X066-RP1C1W1 |
 
 [Return to Contents](#con)
 
