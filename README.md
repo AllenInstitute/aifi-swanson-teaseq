@@ -19,6 +19,13 @@ This repository and the associated manuscript are currently under review. Expect
 
 #### [GEO Repository](#geo)  
 
+#### [dbGaP Repository](#dbgap)  
+
+#### [BarCounter](#bar)  
+- [Main Repository](#bar-mai)  
+- [Requirements/Inputs](#bar-req)  
+- [Usage](#bar-usa)  
+
 #### [General Notes](#gen)  
 - [Genome Builds](#gen-gen)  
 - [Computing Environment](#gen-com)  
@@ -31,11 +38,6 @@ This repository and the associated manuscript are currently under review. Expect
 - [Preprocessing](#sca-pre)  
 - [Analysis](#sca-ana)  
 
-#### [BarCounter](#bar)  
-- [Main Repository](#bar-mai)  
-- [Requirements/Inputs](#bar-req)  
-- [Usage](#bar-usa)  
-
 #### [ICICLE-seq](#ici)  
 - [Requirements/Inputs](#ici-req)  
 - [Datasets](#ici-dat)  
@@ -47,6 +49,18 @@ This repository and the associated manuscript are currently under review. Expect
 - [Datasets](#tea-dat)  
 - [Preprocessing](#tea-pre)  
 - [Analysis](#tea-ana)  
+
+#### [10x Multiome ATAC + Gene Expression](#10m)  
+- [Requirements/Inputs](#10m-req)  
+- [Datasets](#10m-dat)  
+- [Preprocessing](#10m-pre)  
+- [Analysis](#10m-ana)  
+
+#### [CITE-seq](#cite)  
+- [Requirements/Inputs](#cite-req)  
+- [Datasets](#cite-dat)  
+- [Preprocessing](#cite-pre)  
+- [Analysis](#cite-ana)  
 
 #### [Legal](#leg)
 - [License](#leg-lic)  
@@ -64,6 +78,8 @@ https://www.biorxiv.org/content/10.1101/2020.09.04.283887v2
 
 Citation information:  
 Elliott Swanson, Cara Lord, Julian Reading, Alexander T. Heubeck, Adam K. Savage, Richard Green, Xiao-jun Li, Troy R. Torgerson, Thomas F. Bumol, Lucas T. Graybuck, Peter J. Skene. *TEA-seq: a trimodal assay for integrated single cell measurement of transcripts, epitopes, and chromatin accessibility* (2020). bioRxiv 2020.09.04.283887; doi: https://doi.org/10.1101/2020.09.04.283887
+
+Coming soon to [eLife](https://elifesciences.org)!
 
 [Return to Contents](#con)
 
@@ -83,7 +99,19 @@ A detailed bench protocol for TEA-seq written by Elliott Swanson is [available o
 
 ### GEO Repository
 
-Data from Swanson, *et al.* will be available on GEO at [Series  GSE158013](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE158013)
+Data from Swanson, *et al.* will be available on GEO at [Series GSE158013](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE158013)
+
+See method-specific dataset descriptions below for details on specific GEO samples.
+
+[Return to Contents](#con)
+
+------------
+
+<a name="dbgap"></a>
+
+### dbGaP Repository
+
+Raw (FASTQ) data from Swanson, *et al.* will be available on dbGaP at [Study accession   phs002316.v1.p1](http://www.ncbi.nlm.nih.gov/projects/gap/cgi-bin/study.cgi?study_id=phs002316.v1.p1)
 
 [Return to Contents](#con)
 
@@ -98,6 +126,13 @@ Data from Swanson, *et al.* will be available on GEO at [Series  GSE158013](http
 **Genome Builds**  
 All samples used in Swanson, *et al.* were from human donors. We use *GRCHg38/hg38* genome builds throughout our processing and analysis.
 
+<a name="gen-txn"></a>
+
+**Transcriptome Builds and gene annotations**  
+For analysis, we utilized transcriptome annotations from multiple sources:  
+- For preprocessing of scATAC-seq, we utilized ENSEMBLv93 annotations provided by the [10x Genomics 3' RNA-seq reference v3.1.0](https://support.10xgenomics.com/single-cell-gene-expression/software/release-notes/build#GRCh38mm10_3.1.0) (used in-house for RNA-seq pipelines). These annotations were used to assess FRITSS and for gene body counts in our preprocessing pipeline.
+- For downstream analysis, we utilized the annotations stored in the [BioConductor `BSgenome.Hsapiens.UCSC.hg38` package](https://bioconductor.org/packages/release/data/annotation/html/BSgenome.Hsapiens.UCSC.hg38.html), which is imported by ArchR for scATAC-seq analysis.
+
 <a name="gen-com"></a>
 
 **Computing Environment**  
@@ -111,14 +146,15 @@ These software tools are used in various parts of our analysis and processing sc
 
 *command-line tools*  
 [`bcl2fastq`](https://support.illumina.com/sequencing/sequencing_software/bcl2fastq-conversion-software.html)  
-[`cellranger-atac count` >= v1.0.0](https://support.10xgenomics.com/single-cell-atac/software/pipelines/latest/using/count)   
+[`cellranger count` >= v5.0.0](https://support.10xgenomics.com/single-cell-gene-expression/software/pipelines/latest/what-is-cell-ranger)   
+[`cellranger-atac count` >= v1.0.0](https://support.10xgenomics.com/single-cell-atac/software/pipelines/latest/using/count)  
+[`cellranger-arc count` >= v1.0.0](https://support.10xgenomics.com/single-cell-multiome-atac-gex/software/pipelines/latest/using/count)   
 [`bedtools2`](https://github.com/arq5x/bedtools2/releases)  
 [`bowtie2`](http://bowtie-bio.sourceforge.net/bowtie2/index.shtml)  
 [`fastp`](https://github.com/OpenGene/fastp)  
 [`GATK >= v3.7`](https://github.com/broadinstitute/gatk/releases)  
 [`GNU Parallel`](https://www.gnu.org/software/parallel/)  
 [`HTSlib and SAMtools`](http://www.htslib.org/download/)  
-
 
 *Language requirements*  
 [`python >= 3.7`](https://www.python.org/downloads/)  
@@ -143,16 +179,54 @@ The references used for analysis are:
 3. scATAC-seq PBMC peaks from [Lareau, *et al.*](https://pubmed.ncbi.nlm.nih.gov/31235917/) at GEO Accession [GSE123577](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE123577).  
 4. ENCODE/Altius DNase-seq Index regions from [Mouleman, *et al.*](https://www.nature.com/articles/s41586-020-2559-3) at ENCODE File ID [ENCFF503GCK](https://www.encodeproject.org/files/ENCFF503GCK/).  
 
+[Return to Contents](#con)
+
+------------
+
+<a name="bar"></a>
+
+### BarCounter  
+
+Barcode quantification was performed using the C program BarCounter developed by Elliott Swanson.  
+
+We utilize BarCounter for the processing of ADT counts for both the ICICLE-seq and TEA-seq analyses, below.  
+
+<a name="bar-mai"></a>
+
+#### Main Repository  
+
+For convenience, a version of BarCounter is linked to this repository, and will be cloned along with other repository code.  
+
+The main repository for Barcounter releases is at [https://github.com/AllenInstitute/BarCounter](https://github.com/AllenInstitute/BarCounter).
 
 [Return to Contents](#con)
 
+<a name="bar-req"></a>
+
+#### BarCounter Requirements/Inputs
+
+In its current implementation, BarCounter expects reads to conform to the cell and UMI barcode positions used by 10x Genomics for 3' scRNA-seq and the CellRanger Multiome RNA + ATAC kits. In addition, standard Illumina-like FASTQ naming conventions are required.  
+
+**Sequencing Data**  
+- `R1`: 28 nt - First 16 nt are 10x Cell Barcodes; next 12 nt are UMIs  
+- `R2`: 15 nt (or longer) - first 15 nt are Antibody/ADI barcodes. Reads may be longer if co-sequenced with RNA/ATAC data  
+
+[Return to Contents](#con)
+
+<a name="bar-usa"></a>
+
+#### BarCounter Usage
+
+*TODO*  
+
+[Return to Contents](#con)
 ------------
 
 <a name="sca"></a>
 
 ### scATAC-seq
 
-*TODO*
+The single-cell assay for transposase-accessible chromatin (scATAC-seq) is a method that utilizes the Tn5 transposase to insert short sequence tags into the genome - ideally without perturbing the native chromatin state, so that measured fragments reflect the true state of nuclear structure. In Swanson, et al., we compare nuclear isolation protocols and cell permeabilization to assess the quantitative and qualitative differences between scATAC-seq protocols, and to enable multimodal measurement of scATAC-seq with transcription and/or cell surface epitopes.
 
 <a name="sca-req"></a>
 
@@ -171,7 +245,7 @@ The scATAC-seq preprocessing and analysis pipelines are built around libraries w
 
 #### scATAC-seq Datasets  
 
-Because our samples all originate form human donors, raw data (FASTQ files) used for Swanson, *et al.* are in the process of submission to dbGAP for controlled access.  
+Because our samples all originate from human donors, raw data (FASTQ files) used for Swanson, *et al.* are in the process of submission to dbGAP for controlled access.  
 
 Processed data from scATAC-seq datasets used in Swanson, *et al.* will be available for download from these GEO Samples:  
 
@@ -391,51 +465,11 @@ Rscript 04_run_archr_atac_analysis.R \
 
 ------------
 
-<a name="bar"></a>
-
-### BarCounter  
-
-Barcode quantification was performed using the C program BarCounter developed by Elliott Swanson.  
-
-We utilize BarCounter for the processing of ADT counts for both the ICICLE-seq and TEA-seq analyses, below.  
-
-<a name="bar-mai"></a>
-
-#### Main Repository  
-
-For convenience, a version of BarCounter is linked to this repository, and will be cloned along with other repository code.  
-
-The main repository for Barcounter releases is at [https://github.com/AllenInstitute/BarCounter](https://github.com/AllenInstitute/BarCounter).
-
-[Return to Contents](#con)
-
-<a name="bar-req"></a>
-
-#### BarCounter Requirements/Inputs
-
-In its current implementation, BarCounter expects reads to conform to the cell and UMI barcode positions used by 10x Genomics for 3' scRNA-seq and the CellRanger Multiome RNA + ATAC kits. In addition, standard Illumina-like FASTQ naming conventions are required.  
-
-**Sequencing Data**  
-- `R1`: 28 nt - First 16 nt are 10x Cell Barcodes; next 12 nt are UMIs  
-- `R2`: 15 nt (or longer) - first 15 nt are Antibody/ADI barcodes. Reads may be longer if co-sequenced with RNA/ATAC data  
-
-[Return to Contents](#con)
-
-<a name="bar-usa"></a>
-
-#### BarCounter Usage
-
-*TODO*  
-
-[Return to Contents](#con)
-
-------------
-
 <a name="ici"></a>
 
 ### ICICLE-seq
 
-*TODO*  
+Integrated cellular indexing of chromatin landscapes and epitopes (ICICLE-seq) is a proof-of-concept method for the co-capture of scATAC-seq data and cell surface epitopes, intended to be analogous to cellular indexing of transcription and epitopes (CITE-seq). This assay consists of barcoded surface antibody tagging (as in CITE-seq) on permeabilized single cells treated with custom Tn5 complexes that have polyadenylated tag sequences for capture on the 10x 3' scRNA-seq kit.
 
 <a name="ici-req"></a>
 
@@ -458,7 +492,7 @@ ADT data:
 
 #### ICICLE-seq Datasets
 
-Because our samples all originate form human donors, raw data (FASTQ files) used for Swanson, *et al.* are in the process of submission to dbGAP for controlled access.  
+Because our samples all originate from human donors, raw data (FASTQ files) used for Swanson, *et al.* are in the process of submission to dbGAP for controlled access.  
 
 Processed data from ICICLE-seq datasets used in Swanson, *et al.* will be available for download from these GEO Samples:  
 
@@ -535,7 +569,18 @@ RNA data:
 
 #### TEA-seq Datasets
 
-*TODO*  
+Because our samples all originate from human donors, raw data (FASTQ files) used for Swanson, *et al.* are in the process of submission to dbGAP for controlled access.  
+
+Processed data from TEA-seq datasets used in Swanson, *et al.* will be available for download from these GEO Samples:  
+
+| Accession | PBMC Type | Perm/Nuc | Prep | Purification | Pur. Method | WellID |
+| ---       | ---       | ---      | ---  | ---          | ---         | ---     |
+| [GSM4949911](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM4949911) | leukapheresis | Perm | 0.01% Dig. | FACS | D/D-Neu. | X061-AP0C1W1 |
+| [GSM5123951](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM5123951) | leukapheresis | Perm | 0.01% Dig. | FACS | D/D-Neu. | X066-MP0C1W3 |
+| [GSM5123952](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM5123951) | leukapheresis | Perm | 0.01% Dig. | FACS | D/D-Neu. | X066-MP0C1W4 |
+| [GSM5123953](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM5123951) | leukapheresis | Perm | 0.01% Dig. | FACS | D/D-Neu. | X066-MP0C1W5 |
+| [GSM5123954](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM5123951) | leukapheresis | Perm | 0.01% Dig. | FACS | D/D-Neu. | X066-MP0C1W6 |
+
 
 [Return to Contents](#con)
 
@@ -567,6 +612,122 @@ also in [teaseq_analysis/Figure-4_analysis.Rmd](https://github.com/AllenInstitut
 
 *Figure 4 - Figure Supplement 2*  
 also in [teaseq_analysis/Figure-4_analysis.Rmd](https://github.com/AllenInstitute/aifi-swanson-teaseq/blob/master/teaseq_analysis/Figure-4_analysis.Rmd)
+
+[Return to Contents](#con)
+
+------------
+
+<a name="10m"></a>
+
+### 10x Multiome ATAC + Gene Expression
+
+Integrated cellular indexing of chromatin landscapes and epitopes (ICICLE-seq) is a proof-of-concept method for the co-capture of scATAC-seq data and cell surface epitopes, intended to be analogous to cellular indexing of transcription and epitopes (CITE-seq). This assay consists of barcoded surface antibody tagging (as in CITE-seq) on permeabilized single cells treated with custom Tn5 complexes that have polyadenylated tag sequences for capture on the 10x 3' scRNA-seq kit.
+
+<a name="10m-req"></a>
+
+#### 10x Multiome ATAC + Gene Expression Requirements
+
+**Sequencing Data**  
+10x Multiome ATAC + Gene Expression data consists of two sequencing libraries from each well - one for the ATAC data, and the other of gene expression data. These are usually sequenced on separate flowcells due to the different sequence length requirements for the two library types.
+
+ATAC data:  
+- `R1`: 50 nt, ATAC-seq fragment insertion  
+- `I1`: 8 nt, i7 Well/Method Indexes  
+- `I2`: 16 nt, 10x Cell Barcodes  
+- `R2`: 100 nt, ATAC-seq fragment insertion  
+
+Gene expression data:  
+- `R1`: 28 nt, 10x Cell Barcodes and UMIs  
+- `I2`: 8 nt, i7 Well/Method Indexes  
+- `R2`: 100 nt, 3' transcript sequence  
+
+[Return to Contents](#con)
+
+<a name="10m-dat"></a>
+
+#### 10x Multiome ATAC + Gene Expression datasets
+
+Because our samples all originate from human donors, raw data (FASTQ files) used for Swanson, *et al.* are in the process of submission to dbGAP for controlled access.  
+
+Processed data from 10x Multiome ATAC + Gene Expression datasets used in Swanson, *et al.* will be available for download from these GEO Samples:  
+
+| Accession | PBMC Type | Perm/Nuc | Prep | Purification | Pur. Method | WellID |
+| ---       | ---       | ---      | ---  | ---          | ---         | ---     |
+| [GSM5123949](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM5123949) | leukapheresis | Nuc  | 10x NIB    | FACS | D/D-Neu. | X066-W1 |
+| [GSM5123950](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM5123950) | leukapheresis | Perm | 0.01% Dig. | FACS | D/D-Neu. | X066-W2 |
+
+[Return to Contents](#con)
+
+<a name="10m-pre"></a>
+
+#### 10x Multiome ATAC + Gene Expression Preprocessing
+
+**To Do**
+
+[Return to Contents](#con)
+
+<a name="10m-ana"></a>
+
+#### 10x Multiome ATAC + Gene Expression Analysis
+
+**To Do**
+
+[Return to Contents](#con)
+
+------------
+
+<a name="cite"></a>
+
+### CITE-seq
+
+Cellular indexing of transcription and epitopes (CITE-seq) is an assay for co-measurement of single-cell transcriptomes and cell surface epitopes on the 10x Genomics 3' RNA-seq kit.
+
+<a name="cite-req"></a>
+
+#### 10x Multiome ATAC + Gene Expression Requirements
+
+**Sequencing Data**  
+CITE-seq data consists of two sequencing libraries from each well - one for the antibody-derived tags (ADTs) and the other of gene expression data. These are sometimes sequenced together.
+
+ADT data:  
+- `R1`: 28 nt, 10x Cell Barcodes and UMIs  
+- `I1`: 8 nt, i7 Well/Method Indexes  
+- `R2`: 90 nt, the first 15nt of which are the ADT epitope barcodes.  
+
+Gene expression data:  
+- `R1`: 28 nt, 10x Cell Barcodes and UMIs  
+- `I2`: 8 nt, i7 Well/Method Indexes  
+- `R2`: 90 nt, 3' transcript sequence  
+
+[Return to Contents](#con)
+
+<a name="cite-dat"></a>
+
+#### CITE-seq dataset
+
+Because our samples all originate from human donors, raw data (FASTQ files) used for Swanson, *et al.* are in the process of submission to dbGAP for controlled access.  
+
+Processed data from CITE-seq dataset used in Swanson, *et al.* will be available for download from this GEO Sample:  
+
+| Accession | PBMC Type | Perm/Nuc | Prep | Purification | Pur. Method | WellID |
+| ---       | ---       | ---      | ---  | ---          | ---         | ---     |
+| [GSM5123955](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM5123955) | leukapheresis | Whole Cell | NA    | FACS | D/D-Neu. | X066-RW1 |
+
+[Return to Contents](#con)
+
+<a name="cite-pre"></a>
+
+#### CITE-seq Preprocessing
+
+**To Do**
+
+[Return to Contents](#con)
+
+<a name="cite-ana"></a>
+
+#### CITE-seq Analysis
+
+**To Do**
 
 [Return to Contents](#con)
 
