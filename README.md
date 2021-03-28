@@ -825,8 +825,8 @@ Processed data from CITE-seq dataset used in Swanson, *et al.* will be available
 
 For convenience, we list all datasets for all methods in Swanson, et al. below:
 
-| Method | Accession | PBMC Type | Perm/Nuc | Prep | Purification | Pur. Method | WellID |
-| ---       | ---       | ---       | ---      | ---  | ---          | ---         | ---     |
+| Method | Accession | PBMC Type | Perm/Nuc | Prep | Purification | Pur. Method |
+| ---       | ---       | ---       | ---      | ---  | ---          | ---         |
 | scATAC-seq | [GSM4784064](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM4784064) |  leukapheresis | Perm | 0.01% Dig. |none | none |
 | scATAC-seq | [GSM4784065](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM4784065) |  leukapheresis | Perm | 0.01% Dig. | FACS | D/D-Neu. |
 | scATAC-seq | [GSM4784066](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM4784066) |  ficoll | Nuc | 1x 10xNIB |none | none |
