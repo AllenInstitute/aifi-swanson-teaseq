@@ -89,7 +89,7 @@ Coming soon to [eLife](https://elifesciences.org)!
 
 ### Protocols
 
-A detailed bench protocol for TEA-seq written by Elliott Swanson is [available on protocols.io](https://www.protocols.io/edit/tea-seq-bpp2mmqe).
+A detailed bench protocol for TEA-seq written by Elliott Swanson is [available on protocols.io](https://www.protocols.io/view/tea-seq-bqagmsbw).
 
 [Return to Contents](#con)
 
@@ -465,6 +465,91 @@ Rscript 04_run_archr_atac_analysis.R \
 
 ------------
 
+<<<<<<< HEAD
+=======
+<a name="bar"></a>
+
+### BarCounter  
+
+Barcode quantification was performed using the C program BarCounter developed by Elliott Swanson.  
+
+We utilize BarCounter for the processing of ADT counts for both the ICICLE-seq and TEA-seq analyses, below.  
+
+<a name="bar-mai"></a>
+
+#### Main Repository  
+
+For convenience, a version of BarCounter is linked to this repository, and will be cloned along with other repository code.  
+
+The main repository for Barcounter releases is at [https://github.com/AllenInstitute/BarCounter-release](https://github.com/AllenInstitute/BarCounter-release).
+
+[Return to Contents](#con)
+
+<a name="bar-req"></a>
+
+#### BarCounter Requirements/Inputs
+
+In its current implementation, BarCounter expects reads to conform to the cell and UMI barcode positions used by 10x Genomics for 3' scRNA-seq and the CellRanger Multiome RNA + ATAC kits. In addition, standard Illumina-like FASTQ naming conventions are required.  
+
+**Sequencing Data**  
+- `R1`: 28 nt - First 16 nt are 10x Cell Barcodes; next 12 nt are UMIs  
+- `R2`: 15 nt (or longer) - first 15 nt are Antibody/ADI barcodes. Reads may be longer if co-sequenced with RNA/ATAC data  
+
+[Return to Contents](#con)
+
+<a name="bar-usa"></a>
+
+#### BarCounter Usage
+
+BarCounter requires both a cell barcode list and a list of ADT tags for counting antibody UMI abundance. The cell barcode list can be either the full list of available barcodes or a filtered list of barcodes that pass QC criteria (e.g. `outs/filtered_feature_bc_matrix/barcodes.tsv` from CellRanger outputs).
+
+BarCounter has the following parameters:
+
+* `-w` path to a barcode "whitelist" `.txt` or `txt.gz` file  
+* `-t` path to an ADT "taglist" `.csv` or `csv.gz` file  
+* `-1` path to `summary.csv` from `cellranger-atac count`  
+* `-2` a `SampleSheet.csv` file, described below  
+* `-o` path to an output directory  
+
+Full barcode lists for `-w` are provided by 10x Genomics in the cellranger files.  
+
+They can be found in these locations relative to the base cellranger directory:  
+CellRanger ARC v1.0.0: `cellranger-arc-1.0.0/lib/python/cellranger/barcodes/`  
+CellRanger v3.1.0: `cellranger-3.1.0/cellranger-cs/3.1.0/lib/python/cellranger/barcodes/`  
+CellRanger v4.0.0: `cellranger-4.0.0/lib/python/cellranger/barcodes/`  
+CellRanger v5.0.0: `cellranger-5.0.0/lib/python/cellranger/barcodes/`  
+
+The ADT taglist for `-t` should be a 2-column `.csv` file without a header, for example:  
+```
+CAGCCATTCATTAGG,CD10
+GACAAGTGATCTGCA,CD11b
+TACGCCTATAACTTG,CD11c
+CTTCACTCTGTCAGG,CD123
+GTGTGTTGTCCTATG,CD127
+TCTCAGACCTCCGTA,CD14
+```
+
+Multiple R1 and R2 files can be supplied to the `-1` and `-2` arguments. These should be comma-separated without a space, e.g. for two lanes:  
+```
+-1 S001_S1_L001_R1_001.fastq.gz,S001_S1_L002_R1_001.fastq.gz
+-2 S001_S1_L001_R2_001.fastq.gz,S001_S1_L002_R2_001.fastq.gz
+```
+
+An example BarCounter run:  
+```
+/shared/apps/barcounter \
+  -w /shared/apps/cellranger-arc-1.0.0/lib/python/cellranger/barcodes/737K-arc-v1.txt.gz \
+  -t X061_barcounter_taglist_18OCT2020.csv \
+  -1 /mnt/x060-multiome/fastq_downsampled/ADT_125M/X061-AP0C1W1-C_S1_L001_R1_001.fastq.gz \
+  -2 /mnt/x060-multiome/fastq_downsampled/ADT_125M/X061-AP0C1W1-C_S1_L001_R2_001.fastq.gz \
+  -o /mnt/x060-multiome/barcounter_downsampled/X061-AP0C1W1
+```
+
+[Return to Contents](#con)
+
+------------
+
+>>>>>>> 423953cde1c1e4f616aee2f92b2a6e1c0944a7a5
 <a name="ici"></a>
 
 ### ICICLE-seq
