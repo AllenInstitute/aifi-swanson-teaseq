@@ -201,7 +201,7 @@ We utilize BarCounter for the processing of ADT counts for both the ICICLE-seq a
 
 For convenience, a version of BarCounter is linked to this repository, and will be cloned along with other repository code.  
 
-The main repository for Barcounter releases is at [https://github.com/AllenInstitute/BarCounter](https://github.com/AllenInstitute/BarCounter).
+The main repository for Barcounter releases is at [https://github.com/AllenInstitute/BarCounter-release](https://github.com/AllenInstitute/BarCounter-release).
 
 [Return to Contents](#con)
 
