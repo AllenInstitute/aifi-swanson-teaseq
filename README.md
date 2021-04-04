@@ -103,6 +103,8 @@ A detailed bench protocol for TEA-seq written by Elliott Swanson is [available o
 
 Data from Swanson, *et al.* will be available on GEO at [Series GSE158013](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE158013)
 
+The Rmarkdown Notebook at `data/00_geo_data_retrieval.Rmd` provides methods for quickly retrieving supplementary files from GEO.
+
 See method-specific dataset descriptions below for details on specific GEO samples.
 
 [Return to Contents](#con)

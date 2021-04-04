@@ -1,0 +1,124 @@
+---
+title: "Data retrieval from GEO"
+output: html_notebook
+---
+
+In this RMarkdown notebook, we'll demonstrate how to download the supplementary files from our GEO entries, which can be used for downstream analysis of our data.
+
+
+We'll use the `GEOquery` BioConductor package, as well as the `purrr` package for help with handling multiple samples, and `gt` to make some nicely formatted tables.
+
+```{r}
+library(GEOquery)
+library(purrr)
+library(gt)
+```
+
+
+First, let's find our Series accession in GEO. The series for Swanson, et al. 2021 is "GSE158013":
+
+```{r}
+series_info <- getGEO("GSE158013",
+                      GSEMatrix = FALSE)
+```
+
+Next, we'll extract the sample metadata:
+
+```{r}
+sample_info <- GSMList(series_info)
+```
+
+A lot of information about these samples is stored in the "characteristics" fields in the sample GEO metadata. Let's use purrr's `map_dfr()` to parse this data and return a nice data.frame to work with:
+
+```{r}
+sample_characteristics <- map_dfr(
+  sample_info,
+  function(si) {
+    raw_chars <- Meta(si)$characteristics_ch1
+    char_names <- c("geo_accession",sub(":.+","", raw_chars))
+    char_vals <- c(Meta(si)$geo_accession,sub(".+: ","", raw_chars))
+    names(char_vals) <- char_names
+    as.data.frame(as.list(char_vals))
+  }
+)
+
+sample_characteristics %>%
+  gt(rowname_col = "geo_accession",
+     groupname_col = "library_type") %>%
+  tab_options(
+    table.font.size = 10,
+    column_labels.font.weight = "bold",
+    row_group.font.size = 12,
+    row_group.font.weight = "bold"
+  )
+```
+
+Let's save a copy to .csv for later use:
+```{r}
+write.csv(sample_characteristics,
+          "GEO_sample_characteristics.csv",
+          row.names = FALSE)
+```
+
+
+Now, we can use the accession ids and metadata to download relevant files.
+
+First, let's make a directory for each library type:
+
+```{r}
+library_types <- unique(sample_characteristics$library_type)
+
+walk(library_types, dir.create)
+```
+
+Let's make a nice table of supplementary files to retrieve (should be useful for later analysis):
+
+```{r}
+supplementary_files <- map_dfr(
+  sample_info,
+  function(si) {
+    si_meta <- Meta(si)
+    sf <- si_meta[grepl("supplementary_file", names(si_meta))]
+    sf <- unlist(sf)
+    names(sf) <- NULL
+    data.frame(geo_accession = si_meta$geo_accession,
+               supplementary_file = sf)
+  }
+)
+
+head(supplementary_files) %>%
+  gt() %>%
+  tab_options(
+    table.font.size = 10,
+    column_labels.font.weight = "bold"
+  )
+```
+
+```{r}
+write.csv(supplementary_files,
+          "GEO_supplementary_files.csv",
+          row.names = FALSE)
+```
+
+Then, we can download all of the GEO supplementary files for each sample:
+```{r}
+walk(
+  library_types,
+  function(library_type) {
+    type_samples <- sample_characteristics[sample_characteristics$library_type == library_type,]
+    sample_files <- supplementary_files[supplementary_files$geo_accession %in% type_samples$geo_accession,]
+    
+    walk(sample_files$supplementary_file,
+         function(sf) {
+           target <- file.path(library_type,
+                               sub(".+/","",sf))
+           download.file(sf, target)
+         })
+  }
+  )
+```
+
+```{r}
+sessionInfo()
+```
+
