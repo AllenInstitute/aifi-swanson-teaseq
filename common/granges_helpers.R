@@ -99,3 +99,26 @@ pileup_fragments <- function(query_gr,
              cov = pos_cov + neg_cov)
   
 }
+
+convert_fragments_gr <- function(fragments,
+                                 n_threads = 1) {
+  if(n_threads == 1) {
+    lapply(fragments,
+           function(x) {
+             GenomicRanges::GRanges(seqnames = x[["chr"]],
+                                    IRanges::IRanges(start = x[["start"]],
+                                                     end = x[["end"]]))
+           })
+  } else {
+    starting_order <- names(fragments)
+    res <- parallel::mclapply(fragments,
+                              function(x) {
+                                GenomicRanges::GRanges(seqnames = x[["chr"]],
+                                                       IRanges::IRanges(start = x[["start"]],
+                                                                        end = x[["end"]]))
+                              },
+                              mc.cores = n_threads)
+    res <- res[starting_order]
+    return(res)
+  }
+}
